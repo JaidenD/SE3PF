@@ -26,3 +26,20 @@ compile_commands.json
 .cache/
 .vscode/
 .idea/
+
+# Logs of scratch runs (e.g. docs/closed_lifts/work/*.log) and the lab session's terminal record (docs/HARDWARE.md)
+*.log
+session.txt
+
+# Compiler and debugger leftovers outside the build directories
+*.o
+*.a
+*.so
+a.out
+core
+core.*
+
+# Editor and OS clutter
+*~
+*.swp
+.DS_Store
