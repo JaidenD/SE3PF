@@ -1,0 +1,102 @@
+{
+ "s0": {
+  "s0": 0.0,
+  "closed": true,
+  "length": 13.899999999998913,
+  "sigma_min_along": 0.10295997700523961,
+  "fraction_inside_limits": 0.616800920598389,
+  "admissible_arc_tau_forward": 4.292,
+  "admissible_arc_tau_backward": 4.276,
+  "exits": [
+   {
+    "direction": "+x",
+    "tau": 4.29599999999997,
+    "joints": [
+     2
+    ]
+   },
+   {
+    "direction": "-x",
+    "tau": 4.279999999999529,
+    "joints": [
+     2
+    ]
+   }
+  ]
+ },
+ "s250": {
+  "s0": 0.19252191132814164,
+  "closed": true,
+  "length": 13.691999999998936,
+  "sigma_min_along": 0.12731803514638623,
+  "fraction_inside_limits": 0.513142523364486,
+  "admissible_arc_tau_forward": 3.104,
+  "admissible_arc_tau_backward": 3.916,
+  "exits": [
+   {
+    "direction": "+x",
+    "tau": 3.1080000000000023,
+    "joints": [
+     2
+    ]
+   },
+   {
+    "direction": "-x",
+    "tau": 3.9199999999995683,
+    "joints": [
+     2
+    ]
+   }
+  ]
+ },
+ "s500": {
+  "s0": 0.3850438226562833,
+  "closed": true,
+  "length": 11.947999999999128,
+  "sigma_min_along": 0.16416441452628464,
+  "fraction_inside_limits": 0.4601740294511379,
+  "admissible_arc_tau_forward": 2.604,
+  "admissible_arc_tau_backward": 2.888,
+  "exits": [
+   {
+    "direction": "+x",
+    "tau": 2.608000000000002,
+    "joints": [
+     2
+    ]
+   },
+   {
+    "direction": "-x",
+    "tau": 2.8919999999996815,
+    "joints": [
+     2
+    ]
+   }
+  ]
+ },
+ "s750": {
+  "s0": 0.5775657339844249,
+  "closed": true,
+  "length": 14.851999999998808,
+  "sigma_min_along": 0.06485175594195776,
+  "fraction_inside_limits": 0.48222940226171246,
+  "admissible_arc_tau_forward": 3.924,
+  "admissible_arc_tau_backward": 3.232,
+  "exits": [
+   {
+    "direction": "+x",
+    "tau": 3.928000000000003,
+    "joints": [
+     2
+    ]
+   },
+   {
+    "direction": "-x",
+    "tau": 3.2359999999996436,
+    "joints": [
+     2
+    ]
+   }
+  ]
+ }
+}

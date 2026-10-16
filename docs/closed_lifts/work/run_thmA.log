@@ -1,0 +1,9 @@
+holonomy angles (pairs): [1.61182438e-01 1.61182438e-01 8.00754511e-05 8.00754511e-05
+ 0.00000000e+00]
+N0^T W N0prime (should be 0): 4.5670735255892575e-11
+|Phi|_F^2/(2L) = 0.03373614028931092   sum theta^2 / L = 0.033736140289310906
+energy of N0 exp(-s/L Phi) by quadrature: 0.0337361402890973
+  perturbed closed frame 0 energy 0.6652570287092536
+  perturbed closed frame 1 energy 4.458696874471684
+  perturbed closed frame 2 energy 4.467071003740747
+identity check: 71.94729906621144 71.94729906661662

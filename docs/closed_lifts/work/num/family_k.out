@@ -1,0 +1,28 @@
+I up   k=0      E=6.669473686 pen=0.000e+00 u in [0.6393, 0.8681] dist(rest)=8.707e-01 dist(harm)=1.378e-15 lam_min=4.704e-03 it=0 
+I up   k=1      E=6.706508342 pen=3.288e-01 u in [0.4799, 0.6675] dist(rest)=6.684e-01 dist(harm)=2.034e-01 lam_min=5.571e-03 it=4 
+I up   k=10     E=7.032919755 pen=2.226e+00 u in [0.1043, 0.2207] dist(rest)=2.208e-01 dist(harm)=6.507e-01 lam_min=1.729e-02 it=3 
+I up   k=100    E=7.225612822 pen=2.130e+01 u in [-0.0173, 0.0561] dist(rest)=5.610e-02 dist(harm)=8.149e-01 lam_min=1.432e-01 it=3 
+I up   k=1000   E=7.298807447 pen=2.127e+02 u in [-0.0084, 0.0140] dist(rest)=1.405e-02 dist(harm)=8.568e-01 lam_min=1.382e+00 it=3 
+I up   k=10000  E=7.333807958 pen=2.127e+03 u in [-0.0012, 0.0018] dist(rest)=1.824e-03 dist(harm)=8.689e-01 lam_min=1.312e+01 it=3 
+I down k=10000  E=7.333807958 pen=2.127e+03 u in [-0.0012, 0.0018] dist(rest)=1.824e-03 dist(harm)=8.689e-01 lam_min=1.312e+01 it=2 |du vs up| = 1.3e-15
+I down k=1000   E=7.298807447 pen=2.127e+02 u in [-0.0084, 0.0140] dist(rest)=1.405e-02 dist(harm)=8.568e-01 lam_min=1.382e+00 it=2 |du vs up| = 1.1e-12
+I down k=100    E=7.225612822 pen=2.130e+01 u in [-0.0173, 0.0561] dist(rest)=5.610e-02 dist(harm)=8.149e-01 lam_min=1.432e-01 it=3 |du vs up| = 2.6e-15
+I down k=10     E=7.032919755 pen=2.226e+00 u in [0.1043, 0.2207] dist(rest)=2.208e-01 dist(harm)=6.507e-01 lam_min=1.729e-02 it=3 |du vs up| = 1.8e-11
+I down k=1      E=6.706508342 pen=3.288e-01 u in [0.4799, 0.6675] dist(rest)=6.684e-01 dist(harm)=2.034e-01 lam_min=5.571e-03 it=4 |du vs up| = 1.8e-13
+I down k=0      E=6.669473686 pen=0.000e+00 u in [0.6393, 0.8681] dist(rest)=8.707e-01 dist(harm)=1.202e-14 lam_min=4.704e-03 it=4 |du vs up| = 1.1e-14
+I N=1000 k=100 dist(rest)=5.6105e-02 u in [-0.0173, 0.0561]
+I N=1000 k=10000 dist(rest)=1.8243e-03 u in [-0.0012, 0.0018]
+M up   k=0      E=3.257517377 pen=0.000e+00 u in [-0.2318, -0.0264] dist(rest)=2.319e-01 dist(harm)=1.149e-15 lam_min=1.027e-03 it=0 
+M up   k=1      E=3.258737982 pen=2.150e-01 u in [-0.1662, 0.0326] dist(rest)=1.663e-01 dist(harm)=7.695e-02 lam_min=2.469e-03 it=3 
+M up   k=10     E=3.264152808 pen=2.134e+00 u in [-0.0936, 0.0508] dist(rest)=9.359e-02 dist(harm)=1.431e-01 lam_min=1.517e-02 it=3 
+M up   k=100    E=3.283024497 pen=2.127e+01 u in [-0.0273, 0.0197] dist(rest)=2.728e-02 dist(harm)=2.050e-01 lam_min=1.405e-01 it=3 
+M up   k=1000   E=3.296177979 pen=2.127e+02 u in [-0.0040, 0.0030] dist(rest)=3.951e-03 dist(harm)=2.280e-01 lam_min=1.327e+00 it=3 
+M up   k=10000  E=3.298448562 pen=2.127e+03 u in [-0.0004, 0.0003] dist(rest)=4.246e-04 dist(harm)=2.315e-01 lam_min=1.285e+01 it=2 
+M down k=10000  E=3.298448562 pen=2.127e+03 u in [-0.0004, 0.0003] dist(rest)=4.246e-04 dist(harm)=2.315e-01 lam_min=1.285e+01 it=2 |du vs up| = 8.3e-14
+M down k=1000   E=3.296177979 pen=2.127e+02 u in [-0.0040, 0.0030] dist(rest)=3.951e-03 dist(harm)=2.280e-01 lam_min=1.327e+00 it=2 |du vs up| = 3.3e-14
+M down k=100    E=3.283024497 pen=2.127e+01 u in [-0.0273, 0.0197] dist(rest)=2.728e-02 dist(harm)=2.050e-01 lam_min=1.405e-01 it=2 |du vs up| = 4.3e-12
+M down k=10     E=3.264152808 pen=2.134e+00 u in [-0.0936, 0.0508] dist(rest)=9.359e-02 dist(harm)=1.431e-01 lam_min=1.517e-02 it=3 |du vs up| = 1.0e-13
+M down k=1      E=3.258737982 pen=2.150e-01 u in [-0.1662, 0.0326] dist(rest)=1.663e-01 dist(harm)=7.695e-02 lam_min=2.469e-03 it=3 |du vs up| = 8.0e-13
+M down k=0      E=3.257517377 pen=8.882e-16 u in [-0.2318, -0.0264] dist(rest)=2.319e-01 dist(harm)=7.273e-10 lam_min=1.027e-03 it=3 |du vs up| = 7.3e-10
+M N=1000 k=100 dist(rest)=2.7279e-02 u in [-0.0273, 0.0197]
+M N=1000 k=10000 dist(rest)=4.2467e-04 u in [-0.0004, 0.0003]

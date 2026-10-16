@@ -1,0 +1,78 @@
+{
+ "weld_residual_at_start": 3.2612801348363973e-16,
+ "harmonic_M_lead0": {
+  "name": "harmonic_M_lead0",
+  "laps": 1,
+  "max_dev_lap1": 0.000625334000645791,
+  "dev_end_lap1": 0.000625334000645791,
+  "max_dev_all": 0.000625334000645791,
+  "dev_end": 0.000625334000645791,
+  "closure_q_lap1": 0.0006249695189462866,
+  "closure_qd_lap1": 0.008393572796544376,
+  "flange_pos_err_max": 3.1304490466989326e-05,
+  "flange_pos_err_rms": 3.1302727359712926e-05,
+  "flange_att_err_max": 6.504829956756608e-05,
+  "limit_hits": 0,
+  "wall_s": 7.356661796569824
+ },
+ "harmonic_M_lead2tc": {
+  "name": "harmonic_M_lead2tc",
+  "laps": 3,
+  "max_dev_lap1": 0.0005982712683207245,
+  "dev_end_lap1": 0.0005982712683207245,
+  "max_dev_all": 0.015509812721838972,
+  "dev_end": 0.015509812721838972,
+  "closure_q_lap1": 0.0005992714276070062,
+  "closure_qd_lap1": 0.008355503686700672,
+  "flange_pos_err_max": 3.750999739540582e-08,
+  "flange_pos_err_rms": 2.635658698615726e-08,
+  "flange_att_err_max": 7.765588846162459e-08,
+  "limit_hits": 0,
+  "dev_end_of_each_lap": [
+   0.0005982712683207245,
+   0.003164569122692916,
+   0.015509812721838972
+  ],
+  "wall_s": 24.04011559486389
+ },
+ "rest_lift_lead2tc": {
+  "name": "rest_lift_lead2tc",
+  "laps": 1,
+  "max_dev_lap1": 0.17655072956888812,
+  "dev_end_lap1": 0.032385147220138195,
+  "max_dev_all": 0.17655072956888812,
+  "dev_end": 0.032385147220138195,
+  "closure_q_lap1": 0.03238520579485058,
+  "closure_qd_lap1": 0.01941100575988522,
+  "flange_pos_err_max": 3.75099597515206e-08,
+  "flange_pos_err_rms": 2.6356618416951697e-08,
+  "flange_att_err_max": 7.765720388353011e-08,
+  "limit_hits": 0,
+  "max_dev_from_harmonic_lap1": 0.10120781758636557,
+  "dev_from_harmonic_end": 0.06882274051500029,
+  "wall_s": 10.865412473678589
+ },
+ "harmonic_M_perturbed_w+0.01_lead2tc": {
+  "name": "harmonic_M_perturbed_w+0.01_lead2tc",
+  "laps": 3,
+  "max_dev_lap1": 0.012756494065210382,
+  "dev_end_lap1": 0.012756494065210382,
+  "max_dev_all": 0.3163436325089517,
+  "dev_end": 0.3163436325089517,
+  "closure_q_lap1": 0.012756559992055463,
+  "closure_qd_lap1": 0.00884093982570879,
+  "flange_pos_err_max": 3.7509996829630836e-08,
+  "flange_pos_err_rms": 2.6356601427086103e-08,
+  "flange_att_err_max": 7.76558912592917e-08,
+  "limit_hits": 0,
+  "dev_end_of_each_lap": [
+   0.012756494065210382,
+   0.06459587574224186,
+   0.3163436325089517
+  ],
+  "wall_s": 22.829530715942383
+ },
+ "tc": 0.0002,
+ "dt": 0.0001,
+ "integrator": "RK4"
+}

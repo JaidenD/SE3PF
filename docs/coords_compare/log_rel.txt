@@ -1,0 +1,256 @@
+Build (example + polished lift + joint tube J + linearized tubes L): 0.082073 s; L = 0.770088, grid n = 2000
+S5 timing (median over 5000 steps, us): P=13.024 J=8.756 L=6.703 (S1 start); P=13.064 J=8.816 L=6.702 (S3 start)
+JointTube: polish max node change=7.89493e-13 rad; closureGap=1.8677e-10 holonomyAngle=0.432236 rad detH=1 orthH=3.07576e-10 logError=1.11022e-15
+  max|N^T N - I| nodes=2.99972e-10 interp=2.99771e-10  max|N^T t| nodes=6.54198e-11 interp=9.77977e-11
+  |q*'| in [3.48271, 5.28123] rad per unit s; max curvature=3.79209 1/rad (focal distance 0.263707 rad)
+JointTube (wrong lift): closureGap=1.83946e-10 holonomyAngle=0.447288 max|N^T N - I| interp=2.99559e-10 max|N^T t| interp=9.78007e-11
+quintic q* vs Lift::eval: max|dq*|=1.06297e-12 rad, max|dq*'|=6.76123e-09
+A_J vs central differences (h=1e-6, 20 points, |q - q*| 0.05..0.2 rad): max abs err=4.7169e-10 rel=4.87739e-10 projection failures=0
+A_L vs central differences (h=1e-6, 20 points, |q - q*| 0.05..0.2 rad): max abs err=3.88784e-10 rel=5.25184e-10 projection failures=0
+LinTube: max|a^T q*' - 1|=5.58896e-11 max|B q*'|=2.67197e-09 min sigma(A(q*))=0.0540824; wrong lift: max|a^T q*' - 1|=0.056851 max|B q*'|=0.105327
+  L vs paper outputs at |q - q*| = 0.01: max|z - (xi, beta)|=2.62149e-05 (/d^2 = 0.262149), max|eta_L - eta|=2.95487e-05 (/d^2 = 0.295487)
+  L vs paper outputs at |q - q*| = 0.03: max|z - (xi, beta)|=0.000233037 (/d^2 = 0.25893), max|eta_L - eta|=0.000275131 (/d^2 = 0.305702)
+  L vs paper outputs at |q - q*| = 0.1: max|z - (xi, beta)|=0.00256603 (/d^2 = 0.256603), max|eta_L - eta|=0.0032782 (/d^2 = 0.32782)
+  O(d^2) check at d = 0.3, s = 0.473604: projection failed (P 1, L 0); skipped
+  L vs paper outputs at |q - q*| = 0.3: max|z - (xi, beta)|=0.0750558 (/d^2 = 0.833954), max|eta_L - eta|=0.188058 (/d^2 = 2.08954)
+SE(3) tube radius estimate (Panda path, W = diag(0.01 I, I)): 0.125041 (0.716125 s)
+[S1 P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=0.031225 max=0.031225 @t=0 final=7.08648e-07 steady(max last 5 s)=9.30024e-07
+  tool pos err: max=0.0168192 m, steady=9.18468e-07 m; att err: max=15.0734 deg, steady=0.000425407 deg
+  tool eta_dot: final=0.0800025 max|eta_dot - nu_d| last 5 s=3.80261e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.307541 max=0.307541 final=6.14063e-06  paper beta(true lift): start=-5.33601e-15 final=1.21492e-06
+  peak |qd|/qdmax=0.262224 peak |qdd*|/qddmax=0.493799 @t=0 min joint margin=0.359173 rad
+  own outputs: final |own xi|=7.08648e-07 own eta_dot=0.0800025 own beta=1.21492e-06 min sigma(A)=0.0474366 max iterations=1
+[S1 J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=0.031225 max=0.031225 @t=0 final=9.25864e-07 steady(max last 5 s)=9.88343e-07
+  tool pos err: max=0.0168192 m, steady=9.75372e-07 m; att err: max=15.0734 deg, steady=0.000376729 deg
+  tool eta_dot: final=0.0800077 max|eta_dot - nu_d| last 5 s=7.66098e-06 max|eta_dot - nu_d| after 2 s=0.000399498
+  joint dist to lift: start=0.307541 max=0.307541 final=6.1425e-06  paper beta(true lift): start=-5.33601e-15 final=-2.77848e-06
+  peak |qd|/qdmax=0.182847 peak |qdd*|/qddmax=0.301782 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=6.1425e-06 own eta_dot=0.0800082 own beta=0 min sigma(A)=0.156041 max iterations=1
+[S1 L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=0.031225 max=0.031225 @t=0 final=6.65014e-07 steady(max last 5 s)=9.30031e-07
+  tool pos err: max=0.0168192 m, steady=9.18467e-07 m; att err: max=15.0734 deg, steady=0.000425408 deg
+  tool eta_dot: final=0.0800027 max|eta_dot - nu_d| last 5 s=3.74584e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.307541 max=0.307541 final=5.75695e-06  paper beta(true lift): start=-5.33601e-15 final=1.54911e-06
+  peak |qd|/qdmax=0.255441 peak |qdd*|/qddmax=0.463236 @t=0 min joint margin=0.359173 rad
+  own outputs: final |own xi|=1.68582e-06 own eta_dot=0.0800027 own beta=1.54911e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S1 P: max|xi - design| (vector)=2.45657e-05 max||xi| - |xi0|(1+4t)e^-4t|=2.43388e-05
+  VALID S1 J: |xi_J0|=0.307541 max|xi_J - design| (vector)=0.000228687 max||xi_J| - |xi_J0|(1+4t)e^-4t|=0.000228426 final eta_J_dot=0.0800082
+  VALID S1 L: |z0|=0.033823 (paper |(xi0, beta0)| = 0.031225) max|z - design| (vector)=3.09042e-05 max||z| - |z0|(1+4t)e^-4t|=2.69532e-05 final eta_L_dot=0.0800027
+  S1 P tool error / designed response over 0..1.5 s in [0.997706, 1.00084]; max | |xi_SE3| - design | = 2.43388e-05; |xi_SE3| at t = 0.5, 1, 2 s: 0.0126543, 0.00285367, 9.50573e-05
+  S1 J tool error / designed response over 0..1.5 s in [1, 1.62531]; max | |xi_SE3| - design | = 0.00101323; |xi_SE3| at t = 0.5, 1, 2 s: 0.0135612, 0.00370709, 0.0001795
+  S1 L tool error / designed response over 0..1.5 s in [1, 1.08097]; max | |xi_SE3| - design | = 0.000478884; |xi_SE3| at t = 0.5, 1, 2 s: 0.0131561, 0.00305938, 0.000102946
+  S1 design at t = 0.5, 1, 2 s: 0.0126775, 0.00285953, 9.42734e-05
+  S1 J: eta_J0=0.0496122, L: eta_L0=0.103751 (eta0=0.1), J local focal distance 1/kappa=0.65581 rad, start distance 0.307541 rad, denom0 J=33.4394 L=0.976023
+[S2 P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=7.56206e-17 max=1.24886e-06 @t=11.76 final=5.21505e-07 steady(max last 5 s)=9.30024e-07
+  tool pos err: max=1.17173e-06 m, steady=9.18468e-07 m; att err: max=0.000425407 deg, steady=0.000425407 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.60831e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.19976 max=0.19976 final=4.67569e-06  paper beta(true lift): start=0.2 final=2.57339e-06
+  peak |qd|/qdmax=0.116096 peak |qdd*|/qddmax=0.21068 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=5.21505e-07 own eta_dot=0.0800031 own beta=2.57339e-06 min sigma(A)=0.0540822 max iterations=1
+[S2 J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=7.56206e-17 max=0.000524565 @t=0.57 final=5.15243e-07 steady(max last 5 s)=1.04273e-06
+  tool pos err: max=0.000417937 m, steady=9.75373e-07 m; att err: max=0.184061 deg, steady=0.000397843 deg
+  tool eta_dot: final=0.0800049 max|eta_dot - nu_d| last 5 s=8.40596e-06 max|eta_dot - nu_d| after 2 s=6.09483e-05
+  joint dist to lift: start=0.19976 max=0.19976 final=4.25829e-06  paper beta(true lift): start=0.2 final=2.87375e-06
+  peak |qd|/qdmax=0.116097 peak |qdd*|/qddmax=0.213035 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=4.25829e-06 own eta_dot=0.0800035 own beta=0 min sigma(A)=0.189349 max iterations=1
+[S2 L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=7.56206e-17 max=0.000275178 @t=0.44 final=5.19539e-07 steady(max last 5 s)=9.30025e-07
+  tool pos err: max=0.000271183 m, steady=9.18467e-07 m; att err: max=0.0267822 deg, steady=0.000425408 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.60667e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.19976 max=0.19976 final=4.66403e-06  paper beta(true lift): start=0.2 final=2.58756e-06
+  peak |qd|/qdmax=0.116096 peak |qdd*|/qddmax=0.210707 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.6392e-06 own eta_dot=0.0800031 own beta=2.58756e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S2 P: beta0=0.2 max|beta - beta0(1+4t)e^-4t|=0.000151035 max|xi|=1.24886e-06
+  VALID S2 J: |xi_J0|=0.19976 |xi_J_dot0|=0.0263712 max|xi_J - design| (vector)=0.000149911 final eta_J_dot=0.0800035
+  VALID S2 L: z0=(|xi part| 0.00113925, beta part 0.199968) |z_dot0|=0.000544644 max|z - design| (vector)=0.00015092 final eta_L_dot=0.0800031
+[S2small P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=6.01386e-17 max=1.24886e-06 @t=11.76 final=5.21503e-07 steady(max last 5 s)=9.30024e-07
+  tool pos err: max=1.16701e-06 m, steady=9.18468e-07 m; att err: max=0.000425407 deg, steady=0.000425407 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.60831e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.0399524 max=0.0399524 final=4.67568e-06  paper beta(true lift): start=0.04 final=2.5734e-06
+  peak |qd|/qdmax=0.116096 peak |qdd*|/qddmax=0.0410211 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=5.21503e-07 own eta_dot=0.0800031 own beta=2.5734e-06 min sigma(A)=0.0540822 max iterations=1
+[S2small J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=6.01386e-17 max=0.00013056 @t=0.518 final=5.67156e-07 steady(max last 5 s)=1.04273e-06
+  tool pos err: max=0.000109976 m, steady=9.75372e-07 m; att err: max=0.0403544 deg, steady=0.000397843 deg
+  tool eta_dot: final=0.0800052 max|eta_dot - nu_d| last 5 s=8.40595e-06 max|eta_dot - nu_d| after 2 s=1.58775e-05
+  joint dist to lift: start=0.0399524 max=0.0399524 final=4.27721e-06  paper beta(true lift): start=0.04 final=2.63132e-06
+  peak |qd|/qdmax=0.116097 peak |qdd*|/qddmax=0.0414313 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=4.27721e-06 own eta_dot=0.0800036 own beta=0 min sigma(A)=0.189349 max iterations=1
+[S2small L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=6.01386e-17 max=1.05473e-05 @t=0.436 final=5.21423e-07 steady(max last 5 s)=9.30027e-07
+  tool pos err: max=1.04206e-05 m, steady=9.18469e-07 m; att err: max=0.000933888 deg, steady=0.000425408 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.60825e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.0399524 max=0.0399524 final=4.67519e-06  paper beta(true lift): start=0.04 final=2.57399e-06
+  peak |qd|/qdmax=0.116096 peak |qdd*|/qddmax=0.0410129 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.62627e-06 own eta_dot=0.0800031 own beta=2.57399e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S2small P: beta0=0.04 max|beta - beta0(1+4t)e^-4t|=2.93494e-05 max|xi|=1.24886e-06
+  VALID S2small J: |xi_J0|=0.0399524 |xi_J_dot0|=0.00499832 max|xi_J - design| (vector)=2.95001e-05 final eta_J_dot=0.0800036
+  VALID S2small L: z0=(|xi part| 4.45266e-05, beta part 0.0399986) |z_dot0|=2.10857e-05 max|z - design| (vector)=2.93458e-05 final eta_L_dot=0.0800031
+[S2jnative P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=7.56206e-17 max=0.00040496 @t=0.249 final=5.4967e-07 steady(max last 5 s)=9.30024e-07
+  tool pos err: max=0.000347827 m, steady=9.18468e-07 m; att err: max=0.118824 deg, steady=0.000425407 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.63203e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.19976 max=0.19976 final=4.85529e-06  paper beta(true lift): start=0.2 final=2.37297e-06
+  peak |qd|/qdmax=0.116096 peak |qdd*|/qddmax=0.206116 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=5.4967e-07 own eta_dot=0.0800031 own beta=2.37297e-06 min sigma(A)=0.0540822 max iterations=1
+[S2jnative J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=7.56206e-17 max=0.000805466 @t=0.443 final=5.43211e-07 steady(max last 5 s)=1.04273e-06
+  tool pos err: max=0.000641469 m, steady=9.75372e-07 m; att err: max=0.279804 deg, steady=0.000397843 deg
+  tool eta_dot: final=0.0800051 max|eta_dot - nu_d| last 5 s=8.40596e-06 max|eta_dot - nu_d| after 2 s=6.20053e-05
+  joint dist to lift: start=0.19976 max=0.19976 final=4.26193e-06  paper beta(true lift): start=0.2 final=2.74257e-06
+  peak |qd|/qdmax=0.116097 peak |qdd*|/qddmax=0.206168 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=4.26193e-06 own eta_dot=0.0800035 own beta=0 min sigma(A)=0.189349 max iterations=1
+[S2jnative L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=7.56206e-17 max=0.000271583 @t=0.159 final=5.47565e-07 steady(max last 5 s)=9.30028e-07
+  tool pos err: max=0.000211629 m, steady=9.18468e-07 m; att err: max=0.103207 deg, steady=0.000425408 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.63025e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.19976 max=0.19976 final=4.84113e-06  paper beta(true lift): start=0.2 final=2.38783e-06
+  peak |qd|/qdmax=0.116096 peak |qdd*|/qddmax=0.206147 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.44981e-06 own eta_dot=0.0800031 own beta=2.38783e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S2jnative P: beta0=0.2 max|beta - beta0(1+4t)e^-4t|=0.000169984 max|xi|=0.00040496
+  VALID S2jnative J: |xi_J0|=0.19976 |xi_J_dot0|=2.94592e-17 max|xi_J - design| (vector)=0.000151629 final eta_J_dot=0.0800035
+  VALID S2jnative L: z0=(|xi part| 0.00113925, beta part 0.199968) |z_dot0|=0.00489046 max|z - design| (vector)=0.000152989 final eta_L_dot=0.0800031
+S2large beta0=0.4: start joint margin 0.726901
+[S2large4 P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=1.64559e-16 max=1.24886e-06 @t=11.76 final=5.21506e-07 steady(max last 5 s)=9.30024e-07
+  tool pos err: max=1.18292e-06 m, steady=9.18468e-07 m; att err: max=0.000425407 deg, steady=0.000425407 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.60831e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.399636 max=0.399636 final=4.6757e-06  paper beta(true lift): start=0.4 final=2.57338e-06
+  peak |qd|/qdmax=0.178373 peak |qdd*|/qddmax=0.418866 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=5.21506e-07 own eta_dot=0.0800031 own beta=2.57338e-06 min sigma(A)=0.0540822 max iterations=1
+[S2large4 J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=1.64559e-16 max=0.000899986 @t=0.608 final=4.34595e-07 steady(max last 5 s)=1.04273e-06
+  tool pos err: max=0.000697331 m, steady=9.75372e-07 m; att err: max=0.333104 deg, steady=0.000397843 deg
+  tool eta_dot: final=0.0800045 max|eta_dot - nu_d| last 5 s=8.40595e-06 max|eta_dot - nu_d| after 2 s=0.000110437
+  joint dist to lift: start=0.399636 max=0.399636 final=4.35562e-06  paper beta(true lift): start=0.4 final=3.27792e-06
+  peak |qd|/qdmax=0.175308 peak |qdd*|/qddmax=0.425994 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=4.35562e-06 own eta_dot=0.0800034 own beta=0 min sigma(A)=0.189349 max iterations=1
+[S2large4 L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=1.64559e-16 max=0.00116914 @t=0.437 final=5.13956e-07 steady(max last 5 s)=9.30029e-07
+  tool pos err: max=0.00115148 m, steady=9.18467e-07 m; att err: max=0.116058 deg, steady=0.000425408 deg
+  tool eta_dot: final=0.0800032 max|eta_dot - nu_d| last 5 s=3.60201e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.399636 max=0.399636 final=4.63148e-06  paper beta(true lift): start=0.4 final=2.62809e-06
+  peak |qd|/qdmax=0.178829 peak |qdd*|/qddmax=0.420277 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.67787e-06 own eta_dot=0.0800032 own beta=2.62809e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S2large4 P: beta0=0.4 max|beta - beta0(1+4t)e^-4t|=0.000303432 max|xi|=1.24886e-06
+  VALID S2large4 J: |xi_J0|=0.399636 |xi_J_dot0|=0.0572112 max|xi_J - design| (vector)=0.000300398 final eta_J_dot=0.0800034
+  VALID S2large4 L: z0=(|xi part| 0.00475076, beta part 0.399885) |z_dot0|=0.00227724 max|z - design| (vector)=0.000302989 final eta_L_dot=0.0800032
+S2large beta0=0.6: start joint margin 0.727879
+[S2large6 P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=1.72069e-16 max=1.25459e-06 @t=2.119 final=5.21505e-07 steady(max last 5 s)=9.30024e-07
+  tool pos err: max=1.1977e-06 m, steady=9.18468e-07 m; att err: max=0.000428854 deg, steady=0.000425407 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.60831e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.599947 max=0.599947 final=4.67569e-06  paper beta(true lift): start=0.6 final=2.57339e-06
+  peak |qd|/qdmax=0.271002 peak |qdd*|/qddmax=0.619418 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=5.21505e-07 own eta_dot=0.0800031 own beta=2.57339e-06 min sigma(A)=0.0540822 max iterations=1
+[S2large6 J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=1.72069e-16 max=0.00159822 @t=0.523 final=3.63165e-07 steady(max last 5 s)=1.04272e-06
+  tool pos err: max=0.00135664 m, steady=9.75372e-07 m; att err: max=0.492756 deg, steady=0.000397843 deg
+  tool eta_dot: final=0.0800039 max|eta_dot - nu_d| last 5 s=8.40596e-06 max|eta_dot - nu_d| after 2 s=0.000141754
+  joint dist to lift: start=0.599947 max=0.599947 final=4.83615e-06  paper beta(true lift): start=0.6 final=3.87954e-06
+  peak |qd|/qdmax=0.266033 peak |qdd*|/qddmax=0.638417 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=4.83615e-06 own eta_dot=0.0800034 own beta=0 min sigma(A)=0.189349 max iterations=1
+[S2large6 L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=1.72069e-16 max=0.00285478 @t=0.432 final=5.05069e-07 steady(max last 5 s)=9.30029e-07
+  tool pos err: max=0.00281004 m, steady=9.18469e-07 m; att err: max=0.28853 deg, steady=0.000425408 deg
+  tool eta_dot: final=0.0800032 max|eta_dot - nu_d| last 5 s=3.59459e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.599947 max=0.599947 final=4.58198e-06  paper beta(true lift): start=0.6 final=2.69314e-06
+  peak |qd|/qdmax=0.272357 peak |qdd*|/qddmax=0.626118 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.74009e-06 own eta_dot=0.0800032 own beta=2.69314e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S2large6 P: beta0=0.6 max|beta - beta0(1+4t)e^-4t|=0.000456213 max|xi|=1.25459e-06
+  VALID S2large6 J: |xi_J0|=0.599947 |xi_J_dot0|=0.0956246 max|xi_J - design| (vector)=0.000450912 final eta_J_dot=0.0800034
+  VALID S2large6 L: z0=(|xi part| 0.0113097, beta part 0.599783) |z_dot0|=0.00536864 max|z - design| (vector)=0.0004553 final eta_L_dot=0.0800032
+S2large beta0=0.8: start joint margin 0.729672
+[S2large8 P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=2.48869e-16 max=1.69666e-06 @t=0.793 final=5.21502e-07 steady(max last 5 s)=9.30024e-07
+  tool pos err: max=1.68336e-06 m, steady=9.18468e-07 m; att err: max=0.000432475 deg, steady=0.000425407 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.60831e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.801269 max=0.801269 final=4.67567e-06  paper beta(true lift): start=0.8 final=2.57341e-06
+  peak |qd|/qdmax=0.362075 peak |qdd*|/qddmax=0.807116 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=5.21502e-07 own eta_dot=0.0800031 own beta=2.57341e-06 min sigma(A)=0.0540822 max iterations=1
+[S2large8 J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=2.48869e-16 max=0.003481 @t=0.489 final=6.28309e-07 steady(max last 5 s)=1.04273e-06
+  tool pos err: max=0.00302759 m, steady=9.59918e-07 m; att err: max=0.98427 deg, steady=0.000397843 deg
+  tool eta_dot: final=0.0800035 max|eta_dot - nu_d| last 5 s=8.40595e-06 max|eta_dot - nu_d| after 2 s=0.000102699
+  joint dist to lift: start=0.801269 max=0.801269 final=6.58777e-06  paper beta(true lift): start=0.8 final=4.74058e-06
+  peak |qd|/qdmax=0.351879 peak |qdd*|/qddmax=0.862527 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=6.58777e-06 own eta_dot=0.0800039 own beta=0 min sigma(A)=0.189349 max iterations=1
+[S2large8 L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=2.48869e-16 max=0.00562465 @t=0.427 final=4.93163e-07 steady(max last 5 s)=9.30025e-07
+  tool pos err: max=0.00553369 m, steady=9.18468e-07 m; att err: max=0.577358 deg, steady=0.000425408 deg
+  tool eta_dot: final=0.0800032 max|eta_dot - nu_d| last 5 s=3.58454e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=0.801269 max=0.801269 final=4.52029e-06  paper beta(true lift): start=0.8 final=2.78199e-06
+  peak |qd|/qdmax=0.365114 peak |qdd*|/qddmax=0.827013 @t=0 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.82536e-06 own eta_dot=0.0800032 own beta=2.78199e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S2large8 P: beta0=0.8 max|beta - beta0(1+4t)e^-4t|=0.00060948 max|xi|=1.69666e-06
+  VALID S2large8 J: |xi_J0|=0.801269 |xi_J_dot0|=0.154632 max|xi_J - design| (vector)=0.000603049 final eta_J_dot=0.0800039
+  VALID S2large8 L: z0=(|xi part| 0.0216147, beta part 0.799718) |z_dot0|=0.00999988 max|z - design| (vector)=0.000608122 final eta_L_dot=0.0800032
+S2 sweep (peak tool error W-norm; mm; deg; peak qdd fraction):
+  beta0=0.01: P 1.24983e-06  J 3.43094e-05 (0.029155 mm, 0.0103666 deg)  L 1.25091e-06 (0.00116755 mm, 0.000361409 deg)  ok 111  acc P/J/L 0.0324681/0.0324668/0.0324681
+  beta0=0.02: P 1.24933e-06  J 6.73113e-05 (0.0570555 mm, 0.0204733 deg)  L 2.5034e-06 (0.00248587 mm, 0.000361413 deg)  ok 111  acc P/J/L 0.0324681/0.0324668/0.0324681
+  beta0=0.05: P 1.24803e-06  J 0.000160841 (0.135032 mm, 0.0501298 deg)  L 1.65893e-05 (0.0163764 mm, 0.00151799 deg)  ok 111  acc P/J/L 0.051675/0.0521892/0.0516631
+  beta0=0.1: P 1.24641e-06  J 0.000299618 (0.247161 mm, 0.0973769 deg)  L 6.72825e-05 (0.0663384 mm, 0.00643723 deg)  ok 111  acc P/J/L 0.10486/0.105914/0.10483
+  beta0=0.2: P 1.24497e-06  J 0.000524565 (0.417937 mm, 0.184061 deg)  L 0.000275178 (0.271183 mm, 0.0267822 deg)  ok 111  acc P/J/L 0.21068/0.213035/0.210707
+  beta0=0.3: P 1.2455e-06  J 0.000708982 (0.551521 mm, 0.261601 deg)  L 0.000636364 (0.626932 mm, 0.0625719 deg)  ok 111  acc P/J/L 0.31548/0.319714/0.315893
+  beta0=0.4: P 1.24754e-06  J 0.000899986 (0.697331 mm, 0.333104 deg)  L 0.00116914 (1.15148 mm, 0.116058 deg)  ok 111  acc P/J/L 0.418866/0.425994/0.420277
+  beta0=0.6: P 1.25459e-06  J 0.00159822 (1.35664 mm, 0.492756 deg)  L 0.00285478 (2.81004 mm, 0.28853 deg)  ok 111  acc P/J/L 0.619418/0.638417/0.626118
+  beta0=0.8: P 1.69666e-06  J 0.003481 (3.02759 mm, 0.98427 deg)  L 0.00562465 (5.53369 mm, 0.577358 deg)  ok 111  acc P/J/L 0.807116/0.862527/0.827013
+[S3 P] ok=1 failT=-1 rows=15001
+  tool |xi_SE3|: start=4.54755e-14 max=1.25036e-06 @t=2.131 final=8.8304e-07 steady(max last 5 s)=1.24886e-06
+  tool pos err: max=1.16659e-06 m, steady=1.16569e-06 m; att err: max=0.000425407 deg, steady=0.000370201 deg
+  pre-kick max |xi_SE3| (1..5 s)=1.25036e-06  post-kick max=1.24886e-06 @t=11.76  post-kick max posErr=1.16569e-06  max attErrDeg=0.000425407
+  tool eta_dot: final=0.0800036 max|eta_dot - nu_d| last 5 s=8.39968e-06 max|eta_dot - nu_d| after 2 s=8.39968e-06
+  joint dist to lift: start=4.8341e-13 max=0.0274089 final=2.97867e-06  paper beta(true lift): start=-8.78126e-15 final=-1.997e-06
+  peak |qd|/qdmax=0.12393 peak |qdd*|/qddmax=0.128199 @t=5 min joint margin=0.359174 rad
+  own outputs: final |own xi|=8.8304e-07 own eta_dot=0.0800036 own beta=-1.997e-06 min sigma(A)=0.0540822 max iterations=1
+[S3 J] ok=1 failT=-1 rows=15001
+  tool |xi_SE3|: start=4.54755e-14 max=0.000178967 @t=5.527 final=8.61909e-07 steady(max last 5 s)=1.13235e-06
+  tool pos err: max=0.000130802 m, steady=9.96389e-07 m; att err: max=0.0712205 deg, steady=0.000366476 deg
+  pre-kick max |xi_SE3| (1..5 s)=1.13624e-06  post-kick max=0.000178967 @t=5.527  post-kick max posErr=0.000130802  max attErrDeg=0.0712205
+  tool eta_dot: final=0.0800041 max|eta_dot - nu_d| last 5 s=7.88098e-06 max|eta_dot - nu_d| after 2 s=0.000868588
+  joint dist to lift: start=4.8341e-13 max=0.0274683 final=2.9553e-06  paper beta(true lift): start=-8.78126e-15 final=-1.99281e-06
+  peak |qd|/qdmax=0.12393 peak |qdd*|/qddmax=0.128844 @t=5 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.9553e-06 own eta_dot=0.0800044 own beta=0 min sigma(A)=0.189349 max iterations=1
+[S3 L] ok=1 failT=-1 rows=15001
+  tool |xi_SE3|: start=4.54755e-14 max=3.21252e-05 @t=5.246 final=8.83041e-07 steady(max last 5 s)=1.24886e-06
+  tool pos err: max=3.15312e-05 m, steady=1.16569e-06 m; att err: max=0.00352994 deg, steady=0.000370202 deg
+  pre-kick max |xi_SE3| (1..5 s)=1.25035e-06  post-kick max=3.21252e-05 @t=5.246  post-kick max posErr=3.15312e-05  max attErrDeg=0.00352994
+  tool eta_dot: final=0.0800036 max|eta_dot - nu_d| last 5 s=8.39968e-06 max|eta_dot - nu_d| after 2 s=8.80368e-05
+  joint dist to lift: start=4.8341e-13 max=0.0274022 final=2.97866e-06  paper beta(true lift): start=-8.78126e-15 final=-1.997e-06
+  peak |qd|/qdmax=0.12393 peak |qdd*|/qddmax=0.128589 @t=5 min joint margin=0.359174 rad
+  own outputs: final |own xi|=2.18352e-06 own eta_dot=0.0800036 own beta=-1.997e-06 min sigma(A)=0.0540823 max iterations=1
+  VALID S3 J: before kick max|xi_J|=7.26627e-06; after kick xi_J_dot=0.299481 max|xi_J - design| (vector)=9.68865e-05
+  VALID S3 L: before kick max|z|=4.69736e-06; after kick z_dot=(xi part 1.20277e-06, beta part 0.299998) max|z - design| (vector)=9.7285e-05
+  VALID S3 P: beta_dot after kick=0.299998 max|beta - design|=9.72296e-05 xi_dot after kick=1.16547e-06
+S3r (20 random joint-velocity pushes of 0.3 rad/s at t = 1 s): P peak tool error median 0.00699718 [0.0033987, 0.0147385]; P max|xi - design| / peak = 0.00391164
+  peak ratio J/P median 0.988296 [0.957717, 1.06884]; L/P median 1.00165 [0.995811, 1.00541]
+  max_t | |xi_SE3| - |xi_SE3,P| | / P peak: J median 0.0365336 max 0.0824508; L median 0.0017872 max 0.0054143
+[S4 P] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=4.54755e-14 max=1.25082e-06 @t=2.134 final=5.19386e-07 steady(max last 5 s)=9.28762e-07
+  tool pos err: max=1.16762e-06 m, steady=9.17858e-07 m; att err: max=0.00042507 deg, steady=0.00042507 deg
+  tool eta_dot: final=0.0800031 max|eta_dot - nu_d| last 5 s=3.61061e-06 max|eta_dot - nu_d| after 2 s=8.40532e-06
+  joint dist to lift: start=4.8341e-13 max=0.00184427 final=0.00106745  paper beta(true lift): start=-8.78126e-15 final=-0.0010848
+  peak |qd|/qdmax=0.116064 peak |qdd*|/qddmax=0.0324984 @t=13.126 min joint margin=0.359173 rad
+  own outputs: final |own xi|=5.19386e-07 own eta_dot=0.0800031 own beta=2.62142e-06 min sigma(A)=0.0540781 max iterations=1
+[S4 J] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=4.54755e-14 max=0.0138804 @t=16.908 final=0.00649571 steady(max last 5 s)=0.0138804
+  tool pos err: max=0.0136329 m, steady=0.0136329 m; att err: max=1.5507 deg, steady=1.5507 deg
+  tool eta_dot: final=0.0813963 max|eta_dot - nu_d| last 5 s=0.00288188 max|eta_dot - nu_d| after 2 s=0.00454269
+  joint dist to lift: start=4.8341e-13 max=0.0200008 final=0.0146686  paper beta(true lift): start=-8.78126e-15 final=0.000988828
+  peak |qd|/qdmax=0.113174 peak |qdd*|/qddmax=0.0324278 @t=13.114 min joint margin=0.339377 rad
+  own outputs: final |own xi|=4.25716e-06 own eta_dot=0.0800035 own beta=0 min sigma(A)=0.189653 max iterations=1
+[S4 L] ok=1 failT=-1 rows=20001
+  tool |xi_SE3|: start=4.54755e-14 max=0.0138804 @t=7.275 final=0.00653651 steady(max last 5 s)=0.0138804
+  tool pos err: max=0.0136329 m, steady=0.0136329 m; att err: max=1.55071 deg, steady=1.55071 deg
+  tool eta_dot: final=0.0814238 max|eta_dot - nu_d| last 5 s=0.00288082 max|eta_dot - nu_d| after 2 s=0.00454013
+  joint dist to lift: start=4.8341e-13 max=0.0200007 final=0.0146637  paper beta(true lift): start=-8.78126e-15 final=0.000979657
+  peak |qd|/qdmax=0.113173 peak |qdd*|/qddmax=0.0324291 @t=3.481 min joint margin=0.339377 rad
+  own outputs: final |own xi|=2.92351e-06 own eta_dot=0.0800032 own beta=2.87695e-06 min sigma(A)=0.0539355 max iterations=1
+  VALID S4 J (own wrong tube): |xi_J0|=0.0175514 max|xi_J - design|=1.49705e-05 final |xi_J|=4.25716e-06
+  VALID S4 L (own wrong chart): |z0|=0.00374729 max|z - design|=4.91195e-06 final |z|=2.92351e-06
+  S4: max over s of the tool's distance to the path at q*_used(s): 0.01388

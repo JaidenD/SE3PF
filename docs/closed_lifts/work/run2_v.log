@@ -1,0 +1,2 @@
+vertical, start rest: iters 5, |grad| 8.2e-11, E_v 0.032811 (start 0.084606), E_full 7.56213, offset [-0.236,-0.144], lowest eig 0.072, min margin 0.3617 joint 4
+vertical, start harm: iters 6, |grad| 8.7e-12, E_v 0.032811 (start 0.069051), E_full 7.56213, offset [-0.236,-0.144], lowest eig 0.072, min margin 0.3617 joint 4

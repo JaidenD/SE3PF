@@ -1,0 +1,8 @@
+m=50 d=0.01 margin>=0.0 W=24: DP global min E = 6.6722 (recomputed 6.6722) at t0 = 1.53; chain t range [0.79,1.71]; max|offset| 9 of W=24; min joint margin 0.0203; 3s
+local minima of E*(t0) (t0 = fibre arclength from the rest-lift node at s=0, E*): [(np.float64(-1.01), np.float64(6.7872)), (np.float64(1.53), np.float64(6.6722))]
+m=50 d=0.01 margin>=0.1 W=24: DP global min E = 6.6952 (recomputed 6.6952) at t0 = 1.39; chain t range [0.67,1.57]; max|offset| 9 of W=24; min joint margin 0.1042; 2s
+local minima of E*(t0) (t0 = fibre arclength from the rest-lift node at s=0, E*): [(np.float64(-0.95), np.float64(6.7928)), (np.float64(1.39), np.float64(6.6952))]
+m=50 d=0.01 margin>=0.0 W=24: DP global min E = 5.1315 (recomputed 5.1315) at t0 = 1.76; chain t range [0.67,1.78]; max|offset| 9 of W=24; min joint margin 0.0283; 3s
+local minima of E*(t0) (t0 = fibre arclength from the rest-lift node at s=0, E*): [(np.float64(-1.53), np.float64(8.8529)), (np.float64(1.76), np.float64(5.1315))]
+m=50 d=0.01 margin>=0.1 W=24: DP global min E = 5.1563 (recomputed 5.1563) at t0 = 1.66; chain t range [0.57,1.68]; max|offset| 9 of W=24; min joint margin 0.1025; 3s
+local minima of E*(t0) (t0 = fibre arclength from the rest-lift node at s=0, E*): [(np.float64(-1.24), np.float64(9.3022)), (np.float64(1.66), np.float64(5.1563))]

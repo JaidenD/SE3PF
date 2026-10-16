@@ -1,0 +1,15 @@
+S1 P: time to |xi_SE3| < 1e-3: 1.320 s, < 1e-4: 1.990 s; jdist final 6.14e-06
+S1 J: time to |xi_SE3| < 1e-3: 1.460 s, < 1e-4: 2.180 s; jdist final 6.14e-06
+S1 L: time to |xi_SE3| < 1e-3: 1.350 s, < 1e-4: 2.010 s; jdist final 5.76e-06
+S2 P: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 0.000 s; jdist final 4.68e-06
+S2 J: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 1.500 s; jdist final 4.26e-06
+S2 L: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 1.000 s; jdist final 4.66e-06
+S2small P: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 0.000 s; jdist final 4.68e-06
+S2small J: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 0.830 s; jdist final 4.28e-06
+S2small L: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 0.000 s; jdist final 4.68e-06
+S3 P: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 0.000 s; jdist final 2.98e-06
+S3 J: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 6.030 s; jdist final 2.96e-06
+S3 L: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 0.000 s; jdist final 2.98e-06
+S4 P: time to |xi_SE3| < 1e-3: 0.000 s, < 1e-4: 0.000 s; jdist final 1.07e-03
+S4 J: time to |xi_SE3| < 1e-3: nan s, < 1e-4: nan s; jdist final 1.47e-02
+S4 L: time to |xi_SE3| < 1e-3: nan s, < 1e-4: nan s; jdist final 1.47e-02

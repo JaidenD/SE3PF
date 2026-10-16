@@ -1,0 +1,6 @@
+node 0: arc length 3.89, ends at joints 2,3, min|q-q_r| 3.05
+node 10: arc length 2.97, ends at joints 2,1, min|q-q_r| 3.51
+node 20: arc length 2.04, ends at joints 2,1, min|q-q_r| 3.90
+node 30: arc length 2.50, ends at joints 2,3, min|q-q_r| 3.67
+node 40: arc length 3.44, ends at joints 2,3, min|q-q_r| 3.12
+closure: distance from continued reference to the node-0 arc: 0.004705799071056883

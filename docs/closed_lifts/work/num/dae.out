@@ -1,0 +1,86 @@
+I shooting it 0 |P(uw) - uw| = 8.963e-06
+I shooting it 1 |P(uw) - uw| = 5.955e-12
+I {
+ "uw_harmonic_discrete": [
+  0.8183279027804234,
+  0.4920967211199025
+ ],
+ "return_map_defect_n1000": [
+  -6.948703894726904e-06,
+  -8.962646869614677e-06
+ ],
+ "return_map_defect_n2000": [
+  -6.9489330420946516e-06,
+  -8.963158201924504e-06
+ ],
+ "uw_periodic_orbit": [
+  0.8183297662547593,
+  0.49210083022615436
+ ],
+ "shooting_residual": 5.95479221487949e-12,
+ "monodromy": [
+  [
+   2.0863245896451943,
+   1.1984618747018505
+  ],
+  [
+   2.6285469262310457,
+   1.9892461313175678
+  ]
+ ],
+ "floquet_multipliers": [
+  "(3.8133329756470413+0j)",
+  "(0.26223774531572097+0j)"
+ ],
+ "trace": 4.075570720962762,
+ "det": 0.9999998416717691,
+ "greene_residue": -0.5188926802406906,
+ "periodic_orbit_vs_discrete_harmonic_N1000_max_joint2norm": 2.0233517288411298e-06,
+ "periodic_orbit_vs_discrete_harmonic_N250": 3.237239444793174e-05,
+ "periodic_orbit_vs_discrete_harmonic_N500": 8.09338756458442e-06,
+ "closure_after_one_lap_n4000_q": 8.825749053476975e-12,
+ "closure_after_one_lap_n4000_v": 4.588466042309395e-11
+}
+M shooting it 0 |P(uw) - uw| = 8.321e-06
+M shooting it 1 |P(uw) - uw| = 5.069e-12
+M {
+ "uw_harmonic_discrete": [
+  -0.10120723122032724,
+  -0.0031712206721867713
+ ],
+ "return_map_defect_n1000": [
+  -5.555786115177264e-06,
+  -8.320062899340279e-06
+ ],
+ "return_map_defect_n2000": [
+  -5.555876306101437e-06,
+  -8.320590436659663e-06
+ ],
+ "uw_periodic_orbit": [
+  -0.1012066231788514,
+  -0.0031674196642647095
+ ],
+ "shooting_residual": 5.0691456240925525e-12,
+ "monodromy": [
+  [
+   2.5457859888639023,
+   1.2144084314894
+  ],
+  [
+   4.389737388338366,
+   2.486829068207297
+  ]
+ ],
+ "floquet_multipliers": [
+  "(4.825377271104173+0j)",
+  "(0.2072377859670267+0j)"
+ ],
+ "trace": 5.032615057071199,
+ "det": 1.0000005021192402,
+ "greene_residue": -0.7581537642677998,
+ "periodic_orbit_vs_discrete_harmonic_N1000_max_joint2norm": 9.073986826328386e-07,
+ "periodic_orbit_vs_discrete_harmonic_N250": 1.453122764372272e-05,
+ "periodic_orbit_vs_discrete_harmonic_N500": 3.6325486911783937e-06,
+ "closure_after_one_lap_n4000_q": 3.9170182710057666e-12,
+ "closure_after_one_lap_n4000_v": 3.219101307798933e-11
+}

@@ -1,0 +1,11 @@
+holonomy angles: [1.61182439e-01 8.00754503e-05]  det H = 1.0000000000000013
+|expm(Phi)-H| = 8.274884791182425e-16  |Phi|_F^2/(2L) = 0.033736140555249115  sum th^2/L = 0.03373614055524911
+paper frame energy (quadrature): 0.03373614055537985
+  perturbation k=1 eps=0.01: E = 0.068591  (pred +eps^2 pi^2 k^2 |Xi|^2/L = 0.034855)
+  perturbation k=1 eps=0.1: E = 3.519232  (pred +eps^2 pi^2 k^2 |Xi|^2/L = 3.485496)
+  perturbation k=2 eps=0.01: E = 0.360485  (pred +eps^2 pi^2 k^2 |Xi|^2/L = 0.326749)
+  perturbation k=2 eps=0.1: E = 32.708655  (pred +eps^2 pi^2 k^2 |Xi|^2/L = 32.674919)
+  perturbation k=3 eps=0.01: E = 0.703150  (pred +eps^2 pi^2 k^2 |Xi|^2/L = 0.669413)
+  perturbation k=3 eps=0.1: E = 66.975086  (pred +eps^2 pi^2 k^2 |Xi|^2/L = 66.941350)
+  non-principal log: |expm(Phi2)-H| = 1.0487305603814106e-13  E = 51.29726644921398  pred 51.29726645021213
+pseudoinverse holonomy from q*_rest(0): |q(L)-q(0)| = 0.24230378631595637  x.(q(L)-q(0)) = -0.2422950259691194  pose residual 9.51724813026655e-13

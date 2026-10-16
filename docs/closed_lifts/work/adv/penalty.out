@@ -1,0 +1,4 @@
+k=      10: max|q_k - q*_rest| = 2.2076e-01, k*dist = 2.208, Hess min eig 1.727e-02, EL 3.9e-06
+k=     100: max|q_k - q*_rest| = 5.6104e-02, k*dist = 5.610, Hess min eig 1.432e-01, EL 5.8e-08
+k=    1000: max|q_k - q*_rest| = 1.4045e-02, k*dist = 14.045, Hess min eig 1.382e+00, EL 3.3e-09
+k=   10000: max|q_k - q*_rest| = 1.8240e-03, k*dist = 18.240, Hess min eig 1.312e+01, EL 3.4e-09

@@ -1,0 +1,2 @@
+m=50 d=0.01 margin>=0.1 W=24: DP global min E = 5.1535 (recomputed 5.1535) at t0 = -3.97; chain t range [-3.97,-2.48]; max|offset| 11 of W=24; min joint margin 0.1008; 20s
+local minima of E*(t0) (t0 = fibre arclength from the rest-lift node at s=0, E*): [(np.float64(-3.97), np.float64(5.1535)), (np.float64(0.81), np.float64(6.6694)), (np.float64(3.28), np.float64(6.7949))]

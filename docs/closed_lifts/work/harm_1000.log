@@ -1,0 +1,18 @@
+m 1000 rest lift energy E = 7.339780809466598
+   it  0  E = 7.339780809467  |grad|_inf = 1.318e-02
+   it  1  E = 6.704545253261  |grad|_inf = 3.400e-03
+   it  2  E = 6.669619622638  |grad|_inf = 1.434e-04
+   it  3  E = 6.669558117018  |grad|_inf = 1.750e-07
+   it  4  E = 6.669558116680  |grad|_inf = 1.614e-12
+time 171.18049502372742
+on fibres: max |e| = 4.3484491755221e-16
+harmonic lift energy E = 6.669558116680164  rest-lift energy 7.339780809466598
+max_s |q_h - q_rest| (2-norm) = 0.8706934523611579  at s = 0.092410517437508
+beta-offset of harmonic lift from rest lift, x_rest^T(q_h - q_rest): range 0.6392676123552885 0.8681036228958185
+harmonic lift: min joint margin 0.35963984715611064 joint 4
+min sigma_min(J): harmonic 0.15894472589205136  rest 0.20704948490552208
+rest     : horizontal part 1/2 int U = 7.25519, vertical part 1/2 int v^2 = 0.08462, sum 7.33981;  max|q'| = 5.281
+harmonic : horizontal part 1/2 int U = 6.60052, vertical part 1/2 int v^2 = 0.06907, sum 6.66959;  max|q'| = 5.020
+discrete Hessian (periodic Jacobi/Hill operator) lowest eigenvalues *h: [1.74253763e-06 3.96266697e-05 4.37121604e-05 1.59774040e-04]
+twist condition: max b_j*h = -0.9999960851809371 (must be < 0)
+discrete monodromy: trace 4.07556544954673 det 1.0000000076982314  -> multipliers [3.81332727 0.26223818]

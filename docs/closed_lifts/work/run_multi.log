@@ -1,0 +1,9 @@
+u0 = -3.0: start not admissible (max|e| 3.0e+00, in box False)
+u0 = -2.0: start not admissible (max|e| 2.8e+00, in box False)
+u0 = -1.0: E0 = 9.6248 -> E = 6.669136, |grad| 2.1e-13, iters 52, offset range [+0.639,+0.868], lowest Hill eig 2.938, in box True
+u0 = +0.0: E0 = 7.3393 -> E = 6.669136, |grad| 5.8e-12, iters 5, offset range [+0.639,+0.868], lowest Hill eig 2.938, in box True
+u0 = +1.0: E0 = 7.1293 -> E = 6.669136, |grad| 5.2e-14, iters 5, offset range [+0.639,+0.868], lowest Hill eig 2.938, in box True
+u0 = +2.0: E0 = 10.8715 -> E = 6.783486, |grad| 2.5e-13, iters 22, offset range [+1.969,+2.402], lowest Hill eig 3.373, in box True
+u0 = +3.0: start not admissible (max|e| 2.9e+00, in box False)
+
+[exited with code 0]

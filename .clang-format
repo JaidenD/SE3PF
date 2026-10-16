@@ -1,0 +1,35 @@
+# The house style of this project, for new code (clang-format 14 or later). Not applied to the whole tree, to keep
+# the history readable: format a file only in a commit of its own, with no other change.
+#   namespace bodies indented by 4, access specifiers by 4 more than the class, members by 8;
+#   function bodies with the brace on its own line, everything else (namespace, class, if, for, lambda) on the same
+#   line; short member functions on one line; 120 columns.
+BasedOnStyle: LLVM
+Standard: c++17
+ColumnLimit: 120
+IndentWidth: 4
+ContinuationIndentWidth: 4
+NamespaceIndentation: All
+IndentAccessModifiers: true
+IndentCaseLabels: true
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterNamespace: false
+  AfterControlStatement: Never
+  BeforeElse: false
+  BeforeCatch: false
+  BeforeLambdaBody: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+BreakBeforeBinaryOperators: NonAssignment
+PointerAlignment: Left
+DerivePointerAlignment: false
+SpacesBeforeTrailingComments: 2
+FixNamespaceComments: true
+SortIncludes: Never
+IncludeBlocks: Preserve

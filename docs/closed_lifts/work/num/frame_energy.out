@@ -1,0 +1,15 @@
+N=250: E[N] = 0.033736140289, predicted sum theta^2/L = 0.033736140289, rel diff -6.25e-12; N^T W N' constant to 2.3e-11
+N=500: E[N] = 0.033736140289, predicted sum theta^2/L = 0.033736140289, rel diff -6.27e-12; N^T W N' constant to 2.3e-11
+N=1000: E[N] = 0.033736140289, predicted sum theta^2/L = 0.033736140289, rel diff -6.28e-12; N^T W N' constant to 2.3e-11
+N=2000: E[N] = 0.033736140289, predicted sum theta^2/L = 0.033736140289, rel diff -6.29e-12; N^T W N' constant to 2.3e-11
+random Psi 0, f = sin(2 pi s/L) : dE/eps^2 = ['192.622', '192.622', '192.622', '192.622']  predicted 192.622; dE > 0 for all eps: True
+random Psi 0, f = (s/L)(1-s/L)  : dE/eps^2 = ['3.29501', '3.257', '3.2532', '3.25292']  predicted 3.25278; dE > 0 for all eps: True
+random Psi 1, f = sin(2 pi s/L) : dE/eps^2 = ['474.259', '474.259', '474.259', '474.259']  predicted 474.259; dE > 0 for all eps: True
+random Psi 1, f = (s/L)(1-s/L)  : dE/eps^2 = ['7.79719', '7.98759', '8.00663', '8.00804']  predicted 8.00874; dE > 0 for all eps: True
+random Psi 2, f = sin(2 pi s/L) : dE/eps^2 = ['368.292', '368.292', '368.292', '368.292']  predicted 368.292; dE > 0 for all eps: True
+random Psi 2, f = (s/L)(1-s/L)  : dE/eps^2 = ['6.18618', '6.21598', '6.21896', '6.21919']  predicted 6.21929; dE > 0 for all eps: True
+nonuniform rate along Phi: dE/eps^2 = ['0.0168681', '0.0168681', '0.0168681', '0.0168681']  predicted |Phi|^2/(4L) = 0.0168681
+two-factor 0: dE/eps^2 = ['2256.59', '2256.59', '2256.59', '2256.59']  all dE > 0: True
+two-factor 1: dE/eps^2 = ['2266.29', '2266.29', '2266.29', '2266.29']  all dE > 0: True
+two-factor 2: dE/eps^2 = ['2373.47', '2373.47', '2373.47', '2373.47']  all dE > 0: True
+E_min = 0.0337361403; minimizer in the other homotopy class of closed frames: 48.668381

@@ -1,0 +1,10 @@
+FK vs C++: R 2.22e-16  p 1.25e-16  J_b 4.44e-16
+path N=250: R 6.66e-16 p 1.11e-16 zeta 2.11e-15 zeta' 1.78e-14
+   rest lift: |FK(q*) - gamma| 1.12e-15, |x_py - x_cpp| 6.66e-16
+path N=2000: R 8.88e-16 p 1.11e-16 zeta 2.39e-15 zeta' 1.91e-14
+   rest lift: |FK(q*) - gamma| 1.31e-15, |x_py - x_cpp| 7.77e-16
+L python 0.770087645312567  C++ 0.770087645312567
+MuJoCo link7+0.107z vs DH flange: 1.55e-15
+armature [0.1 0.1 0.1 0.1 0.1 0.1 0.1] damping [1. 1. 1. 1. 1. 1. 1.] frictionloss [0. 0. 0. 0. 0. 0. 0.]
+RNE C(q,v)v vs Christoffel identity (FD of M): rel err 1.62e-10
+M(q_r) via MjDyn vs mj_forward: 0.00e+00 ; diag M(q_r) = [0.5612 1.545  0.9789 0.8887 0.1279 0.1326 0.1049]

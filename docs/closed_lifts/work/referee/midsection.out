@@ -1,0 +1,14 @@
+bounding joints (lower end / upper end) over all 100 nodes: {np.int64(2)} {np.int64(2)}
+arc ends a(s) in [-4.290,-2.760], b(s) in [2.477,4.366]; smallest margin of the second-closest face at an end point: 0.461 rad
+midsection offset from rest lift along the arc: [-0.479,0.349] rad
+  max |Delta^1 t_mid|/h^1 = 4.43,  max |Delta^1 a|/h^1 = 7.06
+  max |Delta^2 t_mid|/h^2 = 43.6,  max |Delta^2 a|/h^2 = 70.4
+  max |Delta^3 t_mid|/h^3 = 617,  max |Delta^3 a|/h^3 = 930
+midsection min joint margin 0.3623 (joint 4), E_I = 9.163 (m=100)
+  vs alternatives' midsection (500 nodes, every 5th): 7.936200645541902e-07
+metric diag(1,1,1,1,.25,.25,.25): midsection moves by up to 0.042 rad (2-norm)
+metric K = M (MuJoCo Panda): midsection moves by up to 0.031 rad (2-norm); min margin 0.3623
+|q1| at the two arc ends over s: lower end [1.475,2.161], upper end [1.255,2.302]
+modified box |q1| <= 1.818: lower-end bounding joint switches at nodes [45, 91] (joints [1, 2]); upper-end joints [1, 2]
+  d t_mid/ds around the switches: [[-0.762, -0.56, -0.353, 2.068, 3.982, 4.142, 4.267], [-0.721, -0.273, 0.187, 0.871, 3.881, 4.387, 4.862]]
+  max |Delta^2 t_mid|/h^2: original box 43.6, modified box 465

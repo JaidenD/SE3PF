@@ -1,0 +1,14 @@
+Panda (l = 0.1 m), start pose Psi(0.1, xi0), |xi0| = 0.0312:
+  foot point eta_screw - eta = -1.210e-03   |xi_screw| = 0.031274 vs distance 0.031225 (+0.16 %)
+  screw chart's 'translation' differs from the TCP displacement by 2.188e-03 (|TCP disp.| 1.723e-02, 12.70 %)
+  400 random poses at |xi| = 0.10 x tube radius (0.0125): max |eta_screw - eta| = 3.80e-04 (0.049 % of L), max ||xi_screw| - dist| / dist = 0.06 %
+  400 random poses at |xi| = 0.25 x tube radius (0.0312): max |eta_screw - eta| = 2.62e-03 (0.341 % of L), max ||xi_screw| - dist| / dist = 0.39 %
+  400 random poses at |xi| = 0.50 x tube radius (0.0625): max |eta_screw - eta| = 1.44e-02 (1.866 % of L), max ||xi_screw| - dist| / dist = 2.22 %
+  400 random poses at |xi| = 0.75 x tube radius (0.0938): max |eta_screw - eta| = 4.55e-02 (5.904 % of L), max ||xi_screw| - dist| / dist = 6.86 %
+Rigid body (W = I), start pose Psi(0.1, xi0), |xi0| = 0.6245:
+  foot point eta_screw - eta = +2.979e-02   |xi_screw| = 0.627515 vs distance 0.624500 (+0.48 %)
+  screw chart's 'translation' differs from the TCP displacement by 9.478e-02 (|TCP disp.| 4.516e-01, 20.99 %)
+  400 random poses at |xi| = 0.10 x tube radius (0.1930): max |eta_screw - eta| = 5.50e-03 (0.051 % of L), max ||xi_screw| - dist| / dist = 0.07 %
+  400 random poses at |xi| = 0.25 x tube radius (0.4825): max |eta_screw - eta| = 3.69e-02 (0.339 % of L), max ||xi_screw| - dist| / dist = 0.47 %
+  400 random poses at |xi| = 0.50 x tube radius (0.9650): max |eta_screw - eta| = 2.11e-01 (1.940 % of L), max ||xi_screw| - dist| / dist = 2.34 %
+  400 random poses at |xi| = 0.75 x tube radius (1.4475): max |eta_screw - eta| = 9.73e-01 (8.939 % of L), max ||xi_screw| - dist| / dist = 9.17 %

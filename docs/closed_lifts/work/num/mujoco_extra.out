@@ -1,0 +1,36 @@
+dae_orbit_IC {
+ "dev_from_dae_orbit_max_lap1": 9.60758950086569e-06,
+ "dev_from_dae_orbit_end_of_laps": [
+  9.60758950086569e-06,
+  5.051781544566358e-05,
+  0.00024681244405275974
+ ],
+ "growth_per_lap": [
+  5.2581155180611825,
+  4.88565156421359
+ ],
+ "qd_closure_total": 0.0012246844870307193,
+ "qd_closure_selfmotion_component_x^T dqd": 4.9161270295081875e-05,
+ "flange_twist_error_|J qd - nu zeta|_at_T": 0.000608968088251725,
+ "flange_twist_error_max_along_lap1": 0.000610436152021144,
+ "flange_pos_err_max": 3.725861433165533e-08,
+ "flange_att_err_max": 7.74026008089586e-08
+}
+discrete_harmonic_IC {
+ "dev_from_dae_orbit_max_lap1": 3.4439323157869425e-06,
+ "dev_from_dae_orbit_end_of_laps": [
+  3.4439323157869425e-06,
+  2.010420877838892e-05,
+  9.990625117349996e-05
+ ],
+ "growth_per_lap": [
+  5.8375737195041495,
+  4.969419700858582
+ ],
+ "qd_closure_total": 0.001224494974788691,
+ "qd_closure_selfmotion_component_x^T dqd": 4.8533481074543494e-05,
+ "flange_twist_error_|J qd - nu zeta|_at_T": 0.0006089680882114593,
+ "flange_twist_error_max_along_lap1": 0.0006104361519151426,
+ "flange_pos_err_max": 3.7258614192423227e-08,
+ "flange_att_err_max": 7.740260072770215e-08
+}

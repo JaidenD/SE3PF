@@ -1,0 +1,1 @@
+interior local minima of f=|q-q_r|^2/2 per admissible arc (100 nodes): [1] ; index offset of the min from the rest-lift node: 0 ; min over s of [f(arc ends) - min f]: 2.348

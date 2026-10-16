@@ -1,0 +1,6 @@
+E_k, k=0.3: global min 5.9386 at t0 = -3.94; landscape minima: [(np.float64(-3.94), np.float64(5.9386)), (np.float64(0.75), np.float64(6.7873)), (np.float64(3.21), np.float64(7.4558))]
+E_k, k=1.0: global min 7.0346 at t0 = 0.63; landscape minima: [(np.float64(-3.64), np.float64(7.6447)), (np.float64(0.63), np.float64(7.0346)), (np.float64(2.65), np.float64(8.8206))]
+E_k, k=2.0: global min 7.3414 at t0 = 0.50; landscape minima: [(np.float64(-3.25), np.float64(9.7017)), (np.float64(0.5), np.float64(7.3414))]
+E_k, k=3.0: global min 7.6160 at t0 = 0.41; landscape minima: [(np.float64(-2.84), np.float64(11.3828)), (np.float64(0.41), np.float64(7.616))]
+E_k, k=5.0: global min 8.1156 at t0 = 0.30; landscape minima: [(np.float64(0.3), np.float64(8.1156))]
+E_k, k=10.0: global min 9.2609 at t0 = 0.18; landscape minima: [(np.float64(0.18), np.float64(9.2609))]

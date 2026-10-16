@@ -1,0 +1,4 @@
+metric c=0.001: global min 5.1757 at t0 = -4.02; landscape minima: [(np.float64(-4.02), np.float64(5.1757)), (np.float64(0.81), np.float64(6.6944)), (np.float64(3.32), np.float64(6.8278))]
+metric c=0.01: global min 5.4891 at t0 = -3.92; landscape minima: [(np.float64(-3.92), np.float64(5.4891)), (np.float64(0.81), np.float64(6.9214)), (np.float64(3.21), np.float64(7.1513))]
+metric c=0.03: global min 6.1183 at t0 = -3.83; landscape minima: [(np.float64(-3.83), np.float64(6.1183)), (np.float64(0.81), np.float64(7.4395)), (np.float64(3.12), np.float64(7.8369))]
+metric c=0.1: global min 8.3225 at t0 = -3.64; landscape minima: [(np.float64(-3.64), np.float64(8.3225)), (np.float64(0.8), np.float64(9.4015)), (np.float64(2.94), np.float64(10.3041))]

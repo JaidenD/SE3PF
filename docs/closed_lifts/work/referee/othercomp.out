@@ -1,0 +1,5 @@
+arc 1: length 3.89 rad, ends j2+ / j3-, min dist to main arc 1.614, sigma_min>=0.107, q1 range [1.10,2.87] q2 range [0.14,1.76]
+    min |q-q_r| on arc: 3.053  (main arc: 0.988 )
+arc 2: length 3.94 rad, ends j1- / j2+, min dist to main arc 1.614, sigma_min>=0.103, q1 range [-2.89,-1.21] q2 range [0.14,1.76]
+    min |q-q_r| on arc: 3.011  (main arc: 0.988 )
+covered: 35 of 35

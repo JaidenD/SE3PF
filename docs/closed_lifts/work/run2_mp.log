@@ -1,0 +1,5 @@
+start offset 1.2: |grad| 6.4e-14, E = 6.669136, offset [+0.639,+0.868], Hill eigs [ 2.93821441 66.81609873 73.70411107], Morse index 0, monodromy trace 4.0755, in box True
+start offset 1.4: |grad| 7.8e-14, E = 6.669136, offset [+0.639,+0.868], Hill eigs [ 2.93821441 66.81609873 73.70411107], Morse index 0, monodromy trace 4.0755, in box True
+start offset 1.6: |grad| 1.0e-13, E = 7.459575, offset [+1.392,+1.962], Hill eigs [-5.90412902 65.52179347 66.51970752], Morse index 1, monodromy trace -1.3325, in box True
+minimizer from 0.0: E = 6.669136, offset [+0.639,+0.868], Hill eig 2.938, trace 4.0755, min margin 0.3596 (joint 4), min sigma_min 0.1590
+minimizer from 2.0: E = 7.459575, offset [+1.392,+1.962], Hill eig -5.904, trace -1.3325, min margin 0.3869 (joint 4), min sigma_min 0.1104

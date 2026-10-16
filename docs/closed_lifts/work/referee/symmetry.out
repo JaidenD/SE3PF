@@ -1,0 +1,6 @@
+max |FK(sigma q) - FK(q)| over 20 random q: 1.0824674490095276e-15
+A         : E(q) = 6.669558, E(sigma q) = 6.669558 (max node jump 0.003), sigma(q) admissible at 100% of nodes, min margin of sigma(q) 0.0232, q1 range [-0.63,-0.37], q3 range [0.27,0.72]
+B         : E(q) = 5.128327, E(sigma q) = 5.128327 (max node jump 0.002), sigma(q) admissible at 100% of nodes, min margin of sigma(q) 0.0328, q1 range [1.43,1.94], q3 range [-1.10,-0.83]
+C         : E(q) = 6.783866, E(sigma q) = 6.783866 (max node jump 0.002), sigma(q) admissible at 100% of nodes, min margin of sigma(q) 0.0616, q1 range [-1.89,-1.21], q3 range [0.88,1.21]
+rest      : E(q) = 7.339781, E(sigma q) = 102503.437209 (max node jump 6.283), sigma(q) admissible at 0% of nodes, min margin of sigma(q) -0.2443, q1 range [-0.08,0.05], q3 range [-0.22,0.29]
+midsection: E(q) = 9.163377, E(sigma q) = 15344.862665 (max node jump 6.282), sigma(q) admissible at 0% of nodes, min margin of sigma(q) -0.2441, q1 range [-0.32,0.34], q3 range [-0.02,0.02]

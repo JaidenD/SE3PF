@@ -1,0 +1,7 @@
+metric c=0.3: global min 15.8133 at t0 = -3.45; landscape minima: [(np.float64(-3.45), np.float64(15.8133)), (np.float64(0.76), np.float64(16.2798)), (np.float64(2.59), np.float64(18.6947))]
+metric c=1.0: global min 55.1997 at t0 = 0.72; landscape minima: [(np.float64(-3.27), np.float64(58.7339)), (np.float64(0.72), np.float64(55.1997))]
+metric c=3.0: global min 293.6471 at t0 = 0.70; landscape minima: [(np.float64(-3.17), np.float64(327.2949)), (np.float64(0.7), np.float64(293.6471))]
+pot c=0.0001: global min 5.1428 at t0 = -4.03; landscape minima: [(np.float64(-4.03), np.float64(5.1428)), (np.float64(0.81), np.float64(6.6698)), (np.float64(3.33), np.float64(6.7921))]
+pot c=0.001: global min 5.1877 at t0 = -3.97; landscape minima: [(np.float64(-3.97), np.float64(5.1877)), (np.float64(0.81), np.float64(6.6741)), (np.float64(3.28), np.float64(6.8149))]
+pot c=0.01: global min 5.3957 at t0 = -3.83; landscape minima: [(np.float64(-3.83), np.float64(5.3957)), (np.float64(0.81), np.float64(6.7164)), (np.float64(3.16), np.float64(6.9456))]
+pot c=0.1: global min 6.3829 at t0 = -3.54; landscape minima: [(np.float64(-3.54), np.float64(6.3829)), (np.float64(0.81), np.float64(7.1397)), (np.float64(2.9), np.float64(7.7062))]

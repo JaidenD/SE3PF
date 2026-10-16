@@ -1,0 +1,17 @@
+predicted corrector constant max_s |x.q_f''/h_f| = 18.907; min h_f = 0.821
+k=100000.0: iters  2, |g|/h 6.3e-11, lam0/h 83113.3610, max|q_k-q_f| 1.884e-04, k*dist   18.837, E_I 7.33906, margin 0.3592  [2s]
+k= 10000.0: iters  2, |g|/h 5.3e-11, lam0/h  8518.7326, max|q_k-q_f| 1.824e-03, k*dist   18.240, E_I 7.33381, margin 0.3592  [5s]
+k=  1000.0: iters  5, |g|/h 5.9e-10, lam0/h   897.0006, max|q_k-q_f| 1.405e-02, k*dist   14.045, E_I 7.29881, margin 0.3592  [9s]
+k=   300.0: iters  3, |g|/h 5.5e-11, lam0/h   274.0686, max|q_k-q_f| 3.140e-02, k*dist    9.421, E_I 7.26158, margin 0.3592  [12s]
+k=   100.0: iters  3, |g|/h 5.3e-11, lam0/h    92.9835, max|q_k-q_f| 5.610e-02, k*dist    5.610, E_I 7.22561, margin 0.3592  [15s]
+k=    30.0: iters  3, |g|/h 7.3e-11, lam0/h    29.3466, max|q_k-q_f| 1.086e-01, k*dist    3.258, E_I 7.16119, margin 0.3588  [18s]
+k=    10.0: iters  3, |g|/h 5.9e-11, lam0/h    11.2129, max|q_k-q_f| 2.208e-01, k*dist    2.208, E_I 7.03292, margin 0.3581  [22s]
+k=     3.0: iters  3, |g|/h 1.6e-10, lam0/h     5.0703, max|q_k-q_f| 4.504e-01, k*dist    1.351, E_I 6.82567, margin 0.3574  [25s]
+k=     1.0: iters  4, |g|/h 8.7e-11, lam0/h     3.5489, max|q_k-q_f| 6.684e-01, k*dist    0.668, E_I 6.70651, margin 0.3580  [29s]
+k=     0.3: iters  3, |g|/h 2.1e-10, lam0/h     3.1097, max|q_k-q_f| 7.999e-01, k*dist    0.240, E_I 6.67407, margin 0.3589  [32s]
+k=     0.1: iters  3, |g|/h 9.3e-11, lam0/h     2.9947, max|q_k-q_f| 8.460e-01, k*dist    0.085, E_I 6.67004, margin 0.3594  [35s]
+k=     0.0: iters  3, |g|/h 8.6e-11, lam0/h     2.9383, max|q_k-q_f| 8.707e-01, k*dist    0.000, E_I 6.66947, margin 0.3596  [39s]
+k=0 endpoint vs alternatives' minimizer A (500): 9.284690575707009e-11
+Newton at k=0 started from the rest lift: iters 5, |g|/h 7.1e-11, E_I 6.669474, distance to the continuation endpoint 2.11e-13
+
+[exited with code 0]

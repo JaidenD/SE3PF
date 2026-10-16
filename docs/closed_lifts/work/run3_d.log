@@ -1,0 +1,7 @@
+s = 0.099: admissible self-motion component through q_rest: closed circle False, arclength [-4.17, 3.82], ends at limits of joints [2, 2], min sigma_min on it 0.135
+s = 0.200: admissible self-motion component through q_rest: closed circle False, arclength [-3.89, 3.04], ends at limits of joints [2, 2], min sigma_min on it 0.179
+s = 0.299: admissible self-motion component through q_rest: closed circle False, arclength [-3.38, 2.51], ends at limits of joints [2, 2], min sigma_min on it 0.195
+s = 0.400: admissible self-motion component through q_rest: closed circle False, arclength [-2.83, 2.68], ends at limits of joints [2, 2], min sigma_min on it 0.196
+s = 0.499: admissible self-motion component through q_rest: closed circle False, arclength [-2.84, 3.40], ends at limits of joints [2, 2], min sigma_min on it 0.197
+s = 0.601: admissible self-motion component through q_rest: closed circle False, arclength [-3.39, 4.05], ends at limits of joints [2, 2], min sigma_min on it 0.157
+s = 0.699: admissible self-motion component through q_rest: closed circle False, arclength [-4.04, 4.36], ends at limits of joints [2, 2], min sigma_min on it 0.111

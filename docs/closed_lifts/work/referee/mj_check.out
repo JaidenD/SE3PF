@@ -1,0 +1,2 @@
+K=M harmonic start: |q - q_h| at lap ends ['4.363e-06', '2.096e-05', '1.006e-04'], ratios [np.float64(4.8), np.float64(4.8)], max over lap 1 (every 200 steps) 4.050e-06  [18s]
+rest-lift start: |q(T) - q_rest(0)| 3.316e-02, max deviation from rest lift over lap 1 1.766e-01

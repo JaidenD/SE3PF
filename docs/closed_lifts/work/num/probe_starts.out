@@ -1,0 +1,12 @@
+I {"start": -2.0, "chart_quality_at_start": 0.2174426588692039, "E": 5.128268165249219, "iterations": 79, "max_du_vs_reference": 3.452938577259899, "gradmax_over_h": 1.7191188567758053e-07}
+I {"start": -1.5, "chart_quality_at_start": 0.6564476125720901, "E": 5.128268165249218, "iterations": 79, "max_du_vs_reference": 3.452938577259899, "gradmax_over_h": 2.9384399360371243e-07}
+I {"start": -1.0, "chart_quality_at_start": 0.910796145031834, "E": 6.669473685815419, "iterations": 5, "max_du_vs_reference": 1.3488132832861766e-10, "gradmax_over_h": 3.768293308247798e-09}
+I {"start": 1.0, "chart_quality_at_start": 0.9047342699744868, "E": 6.6694736858154196, "iterations": 4, "max_du_vs_reference": 1.9687651509059378e-10, "gradmax_over_h": 5.722862001313005e-09}
+I {"start": 1.5, "chart_quality_at_start": 0.7211994652314118, "E": 6.669473685815419, "iterations": 5, "max_du_vs_reference": 3.4487968036955863e-12, "gradmax_over_h": 5.891644337966243e-10}
+I {"start": 2.0, "chart_quality_at_start": 0.38601460312306896, "E": 6.783789641968191, "iterations": 79, "max_du_vs_reference": 1.63474586208851, "gradmax_over_h": 4.6785087137335946e-08}
+M {"start": -2.0, "chart_quality_at_start": 0.2174426588692039, "E": 2.5771669447682672, "iterations": 79, "max_du_vs_reference": 2.5809402823629166, "gradmax_over_h": 1.392833243171811e-07}
+M {"start": -1.5, "chart_quality_at_start": 0.6564476125720904, "E": 2.5771669447682704, "iterations": 79, "max_du_vs_reference": 2.5809402823630054, "gradmax_over_h": 1.7620844635024054e-07}
+M {"start": -1.0, "chart_quality_at_start": 0.910796145031834, "E": 3.2575173767862173, "iterations": 5, "max_du_vs_reference": 7.300405696630818e-10, "gradmax_over_h": 4.786468261517059e-11}
+M {"start": 1.0, "chart_quality_at_start": 0.9047342699744869, "E": 3.257517376786213, "iterations": 5, "max_du_vs_reference": 7.287045689086113e-10, "gradmax_over_h": 4.8691961432627664e-11}
+M {"start": 1.5, "chart_quality_at_start": 0.721199465231412, "E": 3.2575173767862213, "iterations": 8, "max_du_vs_reference": 7.270420793181742e-10, "gradmax_over_h": 4.732989388336142e-11}
+M {"start": 2.0, "chart_quality_at_start": 0.386014603123069, "E": 3.332168553716469, "iterations": 79, "max_du_vs_reference": 2.72926468913764, "gradmax_over_h": 3.315866856136483e-08}
