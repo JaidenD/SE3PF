@@ -1,4 +1,0 @@
-vertical: Newton steps 4  E_v 0.03281122271623941  E_full 7.562131323585376
-  max_s |q_v - q_rest| = 0.23639092719602195  min sigma_min 0.20387948800424738
-  self-motion speed v along vertical lift: min 0.2681098691824231 max 0.3299113327282628 (Cor. 4.4: never vanishes)
-  for comparison, full-energy lift: v range -0.034780984930881886 0.5474388907566503

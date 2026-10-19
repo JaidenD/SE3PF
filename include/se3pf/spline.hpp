@@ -30,16 +30,20 @@ namespace se3pf {
                 dy_[n_] = dy_[0];
             }
 
-            // y = interpolant at s. *dy = its derivative with respect to s.
+            // y = interpolant at s; if dy is not null, *dy = its derivative with respect to s. Online: no allocation,
+            // no exceptions. A non-finite s gives NaN in every entry of y and *dy (the weights below are NaN), never
+            // an out-of-range node index. Call build first (checked by an assert in Debug builds).
             void eval(double s, T &y, T *dy = nullptr) const
             {
-                double x = std::fmod(s, L_) 
+                assert(n_ > 0 && "PeriodicHermite::eval before build");
+                const bool finite = std::isfinite(s);
+                double x = finite ? std::fmod(s, L_) : 0.0;  // in (-L, L)
                 if (x < 0.0)
                     x += L_;
                 int k = static_cast<int>(x / h_);
                 if (k >= n_)  // rounding can land exactly on L
                     k = n_ - 1;
-                const double t = x / h_ - k;
+                const double t = finite ? x / h_ - k : std::numeric_limits<double>::quiet_NaN();
                 const double t2 = t * t, t3 = t2 * t;
 
                 y = (2 * t3 - 3 * t2 + 1) * y_[k] + ((t3 - 2 * t2 + t) * h_) * dy_[k]

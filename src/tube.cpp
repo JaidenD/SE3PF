@@ -222,6 +222,8 @@ namespace se3pf {
 
     void Tube::frame(double s, Mat65& N, Mat65* dN) const
     {
+        // A non-finite s gives NaN entries (PeriodicHermite::eval), which Psi, JPsi and the controller's allFinite
+        // checks pass on: online failure is a value.
         N_.eval(s, N, dN);
     }
 
@@ -238,19 +240,19 @@ namespace se3pf {
 
     bool Tube::projectionCondition(const Pose& g, double s, double& phi, double& dphi, Vec6& e) const
     {
+        if (!std::isfinite(s))  // e.g. a NaN guess for Newton's method
+            return false;
         const Pose gErr = inverse(path_.pose(s)) * g;  // g_err(s) = gamma(s)^-1 g
-        // Check if log is defined
         if (!metric_.Log(gErr, e))
             return false;
-
         const Vec6 z = path_.velocity(s);
         const Vec6 dz = path_.acceleration(s);
 
-        // e_g'(s) = -Gamma(e_g)^-1 Ad_{g_err^-1} zeta_gamma, so phi_g' = <e_g', zeta_gamma>_W + <e_g, zeta_gamma'>_W
+        // e_g'(s) = -Gamma(e_g)^-1 Ad_{g_err^-1} zeta_gamma (Online stage), so
+        // phi_g' = <e_g', zeta_gamma>_W + <e_g, zeta_gamma'>_W
         const Vec6 de = -(metric_.GammaInv(e) * (Ad(inverse(gErr)) * z));
         phi = metric_.inner(e, z);
         dphi = metric_.inner(de, z) + metric_.inner(e, dz);
-
         return std::isfinite(phi) && std::isfinite(dphi);
     }
 
@@ -258,20 +260,16 @@ namespace se3pf {
     {
         double s = wrap(guess);
         double phi = 0.0, dphi = 0.0;
-
         if (!projectionCondition(g, s, phi, dphi, e))
             return false;
-        
-        // Newton iteration of at most 20 steps
+        // Always at least one update (Online stage), so the count is the number of updates; started from the
+        // prediction of the previous control cycle, one update suffices.
         for (int k = 1; k <= 20; ++k) {
-            // stop of phi' gets too small
             if (std::abs(dphi) < 1e-12)
                 return false;
-            s = wrap(s - phi / dphi); // Newton step
-            // check the new s satisfies the projection condition still
+            s = wrap(s - phi / dphi);
             if (!projectionCondition(g, s, phi, dphi, e))
                 return false;
-            // check early convergence
             if (std::abs(phi) < 1e-10) {
                 eta = s;
                 if (iterations != nullptr)
@@ -286,20 +284,13 @@ namespace se3pf {
     {
         Vec6 e = Vec6::Zero();
         double s = 0.0;
-        
-        // check if newton iteration failed
         if (!newton(g, guess, s, e, iterations))
             return false;
-
         Mat65 N;
         frame(s, N);
-        
         const Vec5 x = N.transpose() * metric_.flat(e);  // xi = N(eta)^T W e_g(eta) (Proposition 1(a))
-
-        // Check that xi is finite in all entries
         if (!x.allFinite())
             return false;
-
         eta = s;
         xi = x;
         return true;
@@ -307,21 +298,19 @@ namespace se3pf {
 
     bool Tube::globalProject(const Pose& g, double& eta, int samples) const
     {
-        // Newton's method alone may converge to another root of phi_g, which is not the closest point.
-        // To prevent this, search over samples to find minimizing s_k of dist(gamma(s_k), g).
+        // Newton's method alone may converge to another root of phi_g, which is not the closest point
+        // (Proposition 1(b) needs dist(g, gamma(s)) < epsilon). So start it from the closest sample.
         double best = std::numeric_limits<double>::infinity(), sBest = 0.0;
         for (int k = 0; k < samples; ++k) {
             const double s = L_ * k / samples;
-            const double d = metric_.distance(path_.pose(s), g);
+            const double d = metric_.distance(path_.pose(s), g);  // NaN if Log_I fails: never the best
             if (d < best) {
                 best = d;
                 sBest = s;
             }
         }
-
         if (!std::isfinite(best))
             return false;
-
         Vec6 e = Vec6::Zero();
         return newton(g, sBest, eta, e, nullptr);
     }
@@ -333,6 +322,9 @@ namespace se3pf {
         const Vec6 e = N * xi;
         const Mat6 G = metric_.Gamma(e);
 
+        // Differentiating Psi = gamma Exp_I(N xi): moving eta moves gamma with velocity zeta_gamma, seen from the
+        // pose Psi through Ad_{Exp_I(N xi)^-1}, and turns N xi at the rate N' xi, which Exp_I maps through Gamma
+        // (eq:Gamma). Moving xi changes N xi only:
         //   J_Psi = [ Ad_{Exp_I(N xi)^-1} zeta_gamma + Gamma(N xi) N' xi  |  Gamma(N xi) N ]
         Mat6 J = Mat6::Zero();
         J.col(0) = Ad(inverse(metric_.Exp(e))) * path_.velocity(eta) + G * (dN * xi);
@@ -344,6 +336,8 @@ namespace se3pf {
     // Offline: tube-radius estimate
 
     namespace {
+        // dist_I(g1, g2) = |(log R, p)| with (R, p) = g1^-1 g2: the distance of the metric W = I (Example 1). It is
+        // defined everywhere, also at a rotation angle of pi, where the geodesic is not unique but its length is.
         double identityDistance(const Pose& g1, const Pose& g2)
         {
             const Pose g = inverse(g1) * g2;

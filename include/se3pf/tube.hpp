@@ -7,9 +7,15 @@
 #include <array>
 
 namespace se3pf {
-    // A rotation H in SO(5) can be written as the rotation of at most two orthogonal planes:
-    // H u_i = cos(theta_i) u_i + sin(theta_i) v_i
-    // H v_i = -sin(theta_i) u_i + cos(theta_i) v_i
+
+    // A rotation H in SO(5) written as rotations in at most two orthogonal planes: H u_i = cos(theta_i) u_i +
+    // sin(theta_i) v_i and H v_i = -sin(theta_i) u_i + cos(theta_i) v_i, and H is the identity on the rest. Then
+    // log H = sum_i theta_i (v_i u_i^T - u_i v_i^T), and exp(t log H) rotates each plane by t theta_i. This is how
+    // the tube takes the logarithm Phi of the holonomy (Lemma 1) and evaluates exp(-(s/L) Phi) (eq:holonomy).
+    // Why not a plain Phi = log(H): Eigen's matrix logarithm lives in unsupported/ and has no real logarithm for a
+    // rotation by pi; the planes handle that case (test "rotationPlanes: a rotation by pi has a logarithm too") and
+    // keep a tiny angle such as the Panda's 8.0e-5 (test "Tube: holonomy H is a rotation ..."), and they give
+    // exp(-(s/L) Phi) at each of the 2001 grid nodes in closed form, with no matrix exponential.
     struct RotationPlanes {
         int count = 0;  // number of planes, 0 to 2
         std::array<Vec5, 2> u = {Vec5::Zero(), Vec5::Zero()};
@@ -20,53 +26,61 @@ namespace se3pf {
         Mat5 exp(double t) const;  // exp(t Phi)
     };
 
+    // Invariant planes of a rotation H (orthogonal, det H = 1), from the eigenvectors of its symmetric part, which
+    // has the eigenvalue cos(theta_i) twice for each plane and 1 on the fixed directions. A direction counts as
+    // fixed only if 1 - cos(theta) < 1e-12. For a rotation by pi the planes, and so log H, are not unique: any
+    // pairing inside the (-1)-eigenspace is returned, which is still a logarithm of H. Offline: throws
+    // std::invalid_argument if det H <= 0, and std::runtime_error if H is not orthogonal enough to split.
     RotationPlanes rotationPlanes(const Mat5& H);
 
     // What the construction of the normal frame found, for tests and diagnostics.
     struct TubeDiagnostics {
-        int planes = 0;                              // rotation planes of H
-        std::array<double, 2> angles = {0.0, 0.0};   // their rotation angles, largest first
+        int planes = 0;                              // rotation planes of H (two for both example paths)
+        std::array<double, 2> angles = {0.0, 0.0};   // their rotation angles, largest first (0 if absent)
         double detH = 0.0;                           // det H
-        double orthogonalityError = 0.0;             // max |H^T H - I|
-        double logError = 0.0;                       // max |exp(Phi) - H_r|
+        double orthogonalityError = 0.0;             // max |H^T H - I|, before projecting H onto SO(5)
+        double logError = 0.0;                       // max |exp(Phi) - H_r|, H_r the nearest rotation to H
         double skewError = 0.0;                      // max |Phi + Phi^T|
-        double closureGap = 0.0;                     // max |N(s_n) - N(s_0)|
+        double closureGap = 0.0;                     // max |N(s_n) - N(s_0)| on the node values (s_n = L)
     };
 
     // The tube around a closed path (Section IV): the normal frame N(s) of Lemma 1, the tubular map Psi (eq:Psi),
     // the outputs (eta, xi) = Psi^-1(g) of Proposition 1 and the body Jacobian J_Psi.
+    // The tube keeps a reference to the path, so the path must outlive it (build both as named objects).
+    // Construction is offline (it allocates and may throw); frame, Psi, projectionCondition, outputs and JPsi are
+    // online: they do not allocate and report failure by returning false.
     class Tube {
         public:
-            // Build N(s) on gridIntervals many uniform intervals
+            // Builds N(s) on gridIntervals uniform intervals; throws std::runtime_error if the construction fails.
             Tube(const Path& path, const Metric& metric, int gridIntervals = 2000);
             Tube(const Path&& path, const Metric& metric, int gridIntervals = 2000) = delete;  // no temporaries
 
             double length() const { return L_; }
             int gridIntervals() const { return n_; }
-            
             const Path& path() const { return path_; }
             const Metric& metric() const { return metric_; }
             const TubeDiagnostics& diagnostics() const { return diag_; }
 
             double wrap(double s) const;  // s mod L, in [0, L)
 
-            // N(s) and N'(s), by cubic Hermite interpolation of the node values.
+            // N(s) (Lemma 1) and, if dN is not null, N'(s), by cubic Hermite interpolation of the node values.
+            // A non-finite s gives NaN entries, so Psi and JPsi return NaN too (the caller checks allFinite).
             void frame(double s, Mat65& N, Mat65* dN = nullptr) const;
 
-            // Psi(s, xi) = gamma(s) Exp_I(N(s) xi)
+            // Psi(s, xi) = gamma(s) Exp_I(N(s) xi) (eq:Psi)
             Pose Psi(double s, const Vec5& xi) const;
 
             // e = e_g(s) = Log_I(gamma(s)^-1 g) (eq:projection-error), phi = phi_g(s) = <e, zeta_gamma(s)>_W
-            // (eq:projection-condition) and dphi = phi_g'(s). Returns false if Log_I fails.
+            // (eq:projection-condition) and dphi = phi_g'(s). False if Log_I fails or a value is not finite.
             bool projectionCondition(const Pose& g, double s, double& phi, double& dphi, Vec6& e) const;
 
-            // (eta, xi) = Psi^-1(g). eta is computed by newtons method on phi_g from guessed s value,
-            // and then xi is computed as xi = N(eta)^T W e_g(eta).
-            // If iterations isnt null then it receives the number of newton updates.
-            // Returns false if the pose has left the tube.
+            // (eta, xi) = Psi^-1(g) (Proposition 1): eta by Newton's method on phi_g from s = guess, then
+            // xi = N(eta)^T W e_g(eta). iterations (if not null) receives the number of Newton updates, 1 to 20.
+            // False if the pose has left the tube: a value not finite, |phi'| < 1e-12, or no convergence.
             bool outputs(const Pose& g, double guess, double& eta, Vec5& xi, int* iterations = nullptr) const;
 
-            // Find point on the path closest to pose g when you have no starting guess.
+            // Closest point for initial conditions (Proposition 1(c)): the nearest of `samples` uniform points of
+            // the path, refined by Newton's method. Not for the control loop: it evaluates the path samples times.
             bool globalProject(const Pose& g, double& eta, int samples = 720) const;
 
             // Body Jacobian of Psi, Psi(y)^-1 dPsi = (J_Psi(y) dy)^ with y = (eta, xi): columns (eta, xi_1..xi_5).
@@ -94,8 +108,10 @@ namespace se3pf {
         double startFraction = 0.01;  // the doubling starts at epsilon = startFraction * L
         int bisections = 14;
     };
-    // Estimste the tube radius by checking if any sampled points of the path are closer than epsilon to any pose
-    // Psi(s, epsilon d). Double epsilon until it fails, then bisect.
+
+    // Estimate of the tube radius epsilon_0 of Theorem 1: epsilon passes if no sampled point of the path is closer
+    // than epsilon to any pose Psi(s, epsilon d) (the test of Proposition 1(c)). Doubles epsilon until it fails,
+    // then bisects; returns the largest passing epsilon. Offline, under a second in Release.
     double estimateTubeRadius(const Tube& tube, const RadiusOptions& options = {});
 
 }  // namespace se3pf

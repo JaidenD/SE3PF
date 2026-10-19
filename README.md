@@ -200,4 +200,3 @@ with the tests) is the same driver against `mock/franka`, and `tests_sil` runs i
 
 Never tested on the robot yet: the driver is built and linked against libfranka 0.9.2 and runs end to end against
 the mock, but has not talked to a robot.
-# SE3PF
