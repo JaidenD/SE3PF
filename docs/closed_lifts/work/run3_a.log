@@ -1,5 +1,0 @@
-second local min: E = 6.783486, offset [+1.969,+2.402], Hill eig 3.373, trace 4.3795, multipliers [4.13779383 0.24167468], min margin 0.0616 (joint 2), min sigma_min 0.1992
-vertical-energy lift: E_v = 0.032811, trace 2.04400, multipliers [1.23292221 0.81108118]
-Prop E corrector: max |x.q_f''/Hess| = 18.896017832358325  min Hess^V f = 0.8205600069306683  max|q_f''^V| = 17.104136626159196
-twist: min x_j.x_{j+1} on rest lift 0.9999785168344091
-stretch rate -kappa.Y along rest lift: range -1.2370293310553446 0.9209217611724834  integral over a lap -0.03582142568825021  |kappa| range 0.06522525023186347 0.32370616848760864

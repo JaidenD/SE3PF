@@ -7,7 +7,7 @@ using namespace Eigen;
 
 namespace se3pf {
     namespace {
-        // Modified DH parameters of joint i: a_{i-1}, d_i and alpha_{i-1}.
+        // Modified (Craig) DH parameters of joint i: a_{i-1}, d_i and alpha_{i-1} (design doc, appendix).
         // Every alpha is 0, -pi/2 or pi/2, so we store its cosine and sine, which are exactly 0 or +-1: no trig
         // on constants in the 1 kHz loop, and the frames at q = 0 come out exact.
         struct DHRow {

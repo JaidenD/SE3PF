@@ -1,9 +1,0 @@
-   s = 0.1927: |q - q_harm(s)| = 9.35e-04
-   s = 0.3852: |q - q_harm(s)| = 7.06e-04
-   s = 0.5778: |q - q_harm(s)| = 7.81e-04
-one lap of the acceleration-level pseudoinverse from (q*(0), q*'(0)):
-  |q(L) - q*(0)| = 6.96999824539483e-06   |q'(L) - q*'(0)| = 1.490892130503648e-05
-   s = 0.1927: |q - q_harm(s)| = 9.52e-01
-   s = 0.3852: |q - q_harm(s)| = 1.05e+00
-   s = 0.5778: |q - q_harm(s)| = 1.55e+00
-from the rest-posture lift data: |q(L) - q_rest(0)| = 1.243153258317125  |q'(L)-q'(0)| = 1.1308885510682318
