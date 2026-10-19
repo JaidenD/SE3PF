@@ -125,19 +125,23 @@ namespace se3pf {
                           "cruising. Friction: on 2026-10-19 the arm stalled here without compensation (eta_dot 1 % "
                           "of nu_d; |xi| 0.018 and beta 0.030 held by static friction: inside the acceleration "
                           "margin the wrist joints can deliver only 0.02 to 0.06 N m), so the friction feedforward "
-                          "tau_f (the Coulomb levels of Gaz et al. 2019, joint 6 raised to 0.25 N m; half of them "
-                          "was not enough) is on. If the arm still stalls, raise the joints that did not move. "
+                          "tau_f (the Coulomb levels of Gaz et al. 2019 on joints 1 to 4, twice them on the wrist; at "
+                          "the Gaz levels joints 2 to 4 followed the lift and the wrist did not move) is on. If the "
+                          "arm still stalls, raise the joints that did not move. "
                           "An Acceleration stop on a wrist joint soon after the motion "
                           "starts means tau_f exceeds that joint's friction: lower it. If |beta| exceeds 3e-2 here, "
                           "expect 'paper' to stop at its 0.05 rad margin.";
                 e.speed = {0.05, 4.0, 26.8, 4.0};
                 e.duration = 38.0;
                 e.limits.flangeSpeed = 0.2;
-                // Full Gaz et al. 2019 levels, joint 6 raised: at half of them (run loops_2, 2026-10-19) the wrist
-                // never moved, and the torques held without motion were 0.235 (joint 5), 0.148 (6) and 0.141 N m (7),
-                // joint 6 at Gaz's full level 0.152 already.
+                // Joints 1 to 4: the Gaz et al. 2019 levels (run loops_3, 2026-10-19: joints 2, 3 and 4 followed the
+                // lift with them). The wrist: twice those levels. At half of them (loops_2) and at them (loops_3,
+                // joint 6 at 0.25) the wrist never moved; the torques it held without motion were 0.43 (joint 5),
+                // 0.27 (6) and 0.28 N m (7).
                 e.friction = FrictionFeedforward::gaz2019();
-                e.friction.coulomb[5] = 0.25;
+                e.friction.coulomb[4] *= 2.0;
+                e.friction.coulomb[5] = 0.50;
+                e.friction.coulomb[6] *= 2.0;
                 v.push_back(e);
             }
             {

@@ -304,6 +304,13 @@ TEST_CASE("robot_driver_mock: every experiment end to end: approach, torque loop
             else
                 CHECK(testing::maxDiff(log.vec(last, "q"), log.vec(0, "q")) < 2e-3);
         }
+        // The measured link-side torque tau_J is logged (the mock reports its last command plus G): close to tauG
+        double maxTauJGap = 0.0;
+        for (std::size_t k = 100; k < log.rows.size(); ++k)
+            maxTauJGap = std::max(maxTauJGap, testing::maxDiff(log.vec(k, "tauJ"), log.vec(k, "tauG")));
+        CAPTURE(maxTauJGap);
+        CHECK(maxTauJGap < 0.5);
+        CHECK(log.vec(last, "tauJ").cwiseAbs().maxCoeff() > 1.0);  // gravity on joints 2 and 4
         // The friction feedforward in the log: zero at the first cycle, never above Fc + Fv |v|, part of tau
         if (friction) {
             const Vec7 fc = e.friction.coulomb;
@@ -535,7 +542,7 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         CHECK(on.contains("Finished at rest."));
         CHECK_FALSE(on.contains("SAFETY STOP"));
         CHECK(on.contains("callback allocations: 0"));
-        CHECK(on.contains("tau_f <= 0.64 N m (joint 4)"));
+        CHECK(on.contains("tau_f <= 0.84 N m (joint 5)"));
         const Csv log = readCsv(logPath("coulomb_on"));
         const Cruise d = cruiseOf(log);
         CAPTURE(d.etaDot, d.maxXi, d.maxBeta);

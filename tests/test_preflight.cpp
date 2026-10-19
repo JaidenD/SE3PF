@@ -161,10 +161,12 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK(e.friction.velocityScale == 0.01);
     }
     Vec7 expected = FrictionFeedforward::gaz2019().coulomb;
-    expected[5] = 0.25;  // joint 6 raised (run loops_2 of 2026-10-19: stuck at Gaz's 0.152 N m)
+    expected[4] *= 2.0;  // the wrist: twice Gaz (runs loops_2 and loops_3 of 2026-10-19: stuck at the Gaz levels)
+    expected[5] = 0.50;
+    expected[6] *= 2.0;
     CHECK(maxDiff(spec("loops").friction.coulomb, expected) == 0.0);
     CHECK(spec("loops").friction.viscous.isZero());
-    CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.65);  // joint 4: 0.64 N m, the largest
+    CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.85);  // joint 5: 0.84 N m, the largest
 }
 
 TEST_CASE("SpeedProfile: values, an exact time derivative, continuity at the joints, zero outside")
@@ -469,10 +471,10 @@ TEST_CASE("preflight with the friction feedforward: loops passes with a model, t
     INFO(r.summary());
     CHECK(r.ok);
     checkWithinLimits(r);
-    // The peak: the largest Fc (joint 4, 0.32 N m), reached while cruising; the summary names it
-    CHECK_THAT(r.peaks.maxTauF, WithinAbs(f.coulomb[3], 2e-3));
-    CHECK(r.peaks.maxTauFJoint == 3);
-    CHECK(r.summary().find("tau_f <= 0.64 N m (joint 4)") != std::string::npos);
+    // The peak: the largest Fc (joint 5, 0.84 N m), reached while cruising; the summary names it
+    CHECK_THAT(r.peaks.maxTauF, WithinAbs(f.coulomb[4], 2e-3));
+    CHECK(r.peaks.maxTauFJoint == 4);
+    CHECK(r.summary().find("tau_f <= 0.84 N m (joint 5)") != std::string::npos);
     // Smooth: the torque rate stays far below the 600 N m/s margin (the sign changes go through tanh)
     CAPTURE(r.peaks.maxTauRate);
     CHECK(r.peaks.maxTauRate < 20.0);

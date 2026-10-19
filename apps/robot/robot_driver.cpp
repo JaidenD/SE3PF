@@ -728,6 +728,7 @@ namespace {
             if (res.rows < log.size()) {
                 ExperimentLogRow& row = log[res.rows++];
                 row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, tauG, tauF);
+                row.tauJ = vec7(s.tau_J);
                 row.periodMs = static_cast<double>(period.toMSec());
                 row.successRate = s.control_command_success_rate;
                 row.computeUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)

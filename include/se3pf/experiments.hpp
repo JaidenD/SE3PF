@@ -276,6 +276,8 @@ namespace se3pf {
         Vec7 tau = Vec7::Zero();    // commanded torque (M qdd* + c + tau_f, or the stop's -K_s (q - q_stop) - D qd)
         Vec7 tauG = Vec7::Zero();   // tau + G
         Vec7 tauF = Vec7::Zero();   // the friction feedforward tau_f in tau (zero in the stopping phase)
+        Vec7 tauJ = Vec7::Zero();   // driver only: the measured link-side joint torque tau_J (RobotState::tau_J,
+                                    // gravity included): against tauG it shows whether the command is realised
         double computeUs = 0.0;     // driver only: time spent in the callback, microseconds
         double periodMs = 0.0;      // driver only: libfranka's period of this callback, ms
         double successRate = 0.0;   // driver only: RobotState::control_command_success_rate
