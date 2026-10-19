@@ -182,6 +182,20 @@ namespace se3pf {
                 // its breakaway, instead of 0.5 N m.
                 e.rotorInertia = (Vec7() << 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5).finished();
                 v.push_back(e);
+                // The ablation asked for on 2026-10-19: the same run with the integral action and gains but neither
+                // the friction feedforward nor the wrist's command inertia, to see what the integrators do alone
+                ExperimentSpec a = e;
+                a.name = "loops-integral";
+                a.title = "Two loops at constant speed: integral action only (ablation)";
+                a.purpose = "The 'loops' run with its gains and integral action, but without the friction "
+                            "feedforward and without the wrist's command inertia: what the integrators achieve on "
+                            "their own against the robot's static friction (CTRL-1, 2026-10-19).";
+                a.watch = "Pass criteria as 'loops'. Expect the wrist to stick (the feedback can command only 0.02 "
+                          "to 0.06 N m there inside the acceleration margin) and the integrals to wind up to their "
+                          "clamps; a Redundancy or Acceleration stop is the likely end.";
+                a.friction = FrictionFeedforward();
+                a.rotorInertia.setZero();
+                v.push_back(a);
             }
             {
                 ExperimentSpec e = base;

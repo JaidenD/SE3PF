@@ -93,9 +93,9 @@ namespace {
 TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is valid and never loosens a margin")
 {
     const std::vector<ExperimentSpec>& all = experiments();
-    REQUIRE(all.size() == 5);
-    const char* order[] = {"hold", "loops", "recover", "paper", "self-motion"};
-    for (int i = 0; i < 5; ++i) {
+    REQUIRE(all.size() == 6);
+    const char* order[] = {"hold", "loops", "loops-integral", "recover", "paper", "self-motion"};
+    for (int i = 0; i < 6; ++i) {
         CAPTURE(i);
         CHECK(all[i].name == order[i]);
         CHECK(findExperiment(order[i]) == &all[i]);
@@ -117,13 +117,14 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK(e.rampTime >= 1.0);
         CHECK(e.rampTime <= 2.0);
         // The paper's poles at -4 and k_t = 5, except loops: poles at -6 and k_t = 10 (CTRL-1, 2026-10-19)
-        const double lambda = e.name == "loops" ? 6.0 : 4.0;
+        const bool loopsLike = e.name == "loops" || e.name == "loops-integral";
+        const double lambda = loopsLike ? 6.0 : 4.0;
         CHECK(e.gains.Kp == lambda * lambda);
         CHECK(e.gains.Kd == 2.0 * lambda);
         CHECK(e.gains.KpBeta == lambda * lambda);
         CHECK(e.gains.KdBeta == 2.0 * lambda);
         // Integral action only in loops (CTRL-1)
-        if (e.name == "loops") {
+        if (loopsLike) {
             CHECK(e.gains.kiEta == 25.0);
             CHECK(e.gains.Ki == 36.0);
             CHECK(e.gains.KiBeta == 36.0);
@@ -136,7 +137,7 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
             CHECK(e.gains.KiBeta == 0.0);
         }
         if (e.mode == TangentialReference::Mode::Velocity) {
-            CHECK(e.gains.kt == (e.name == "loops" ? 15.0 : 5.0));
+            CHECK(e.gains.kt == (loopsLike ? 15.0 : 5.0));
             CHECK(e.speed.end() <= e.duration);
             CHECK(e.speed.rampUp >= 2.0);  // smooth start
             CHECK(e.speed.rampDown >= 4.0);  // ends at rest
@@ -1075,8 +1076,8 @@ TEST_CASE("preflight from a given start: the measured start after the approach")
     const PreflightReport n = preflight(s, nullptr, s.monitor(), nullptr, &near);
     CHECK(n.ok);
     CHECK(n.startBeta != base.startBeta);
-    // A start beyond the margin: the same pose with beta = 0.055 instead of 0.04 (Redundancy at t = 0)
-    const Vec7 far = ex.start(ex.redundancy(), Vec5::Zero(), 0.055);
+    // A start beyond the margin: the same pose with beta = 0.11 instead of 0.04 (Redundancy at t = 0)
+    const Vec7 far = ex.start(ex.redundancy(), Vec5::Zero(), 0.11);
     const PreflightReport f = preflight(s, nullptr, s.monitor(), nullptr, &far);
     CHECK_FALSE(f.ok);
     CHECK(f.violation == Violation::Redundancy);
