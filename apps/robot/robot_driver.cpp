@@ -3,10 +3,9 @@
 // The only code of the project that includes libfranka. The same source builds two programs:
 //   robot_driver       against the real libfranka 0.9.2 (cmake -DSE3PF_WITH_LIBFRANKA=ON -DFranka_DIR=...);
 //   robot_driver_mock  against mock/franka (always built with the tests; software in the loop), with the test-only
-//                      options --yes (answers every prompt), --inject (forces a violation) and
-//                      --compensation-scale (scales the experiment's friction feedforward and rotor inertia; 0 is
-//                      the controller as it ran before CTRL-1), compiled only into the mock build
-//                      (SE3PF_MOCK_FRANKA).
+//                      options --yes (answers every prompt), --inject (forces a violation) and --before-ctrl1
+//                      (the experiment with the controller as it ran before CTRL-1: the paper's gains, no friction
+//                      feedforward, franka::Model's M alone), compiled only into the mock build (SE3PF_MOCK_FRANKA).
 //
 // Usage:
 //   robot_driver list                                          the experiments, in the order to run them
@@ -169,8 +168,8 @@ namespace {
         bool yes = false;          // mock build only: answer every prompt
         Violation inject = Violation::None;  // mock build only: force this violation from injectTime on ...
         double injectTime = 0.0;             // ... s after the torque loop started
-        double compensationScale = 1.0;      // mock build only: the spec's friction feedforward and rotor inertia
-                                             // times this (0: the controller as before CTRL-1)
+        bool beforeCtrl1 = false;            // mock build only: the controller as before CTRL-1 (the paper's gains,
+                                             // no friction feedforward, no rotor inertia)
     };
 
     void usage(const char* prog)
@@ -185,8 +184,8 @@ namespace {
                   << "  (mock build) --yes answers every prompt; --inject=<violation>@<t> forces that violation t s "
                      "into the torque loop (violations: projection, joint-limit, joint-velocity, acceleration, "
                      "torque, torque-rate, flange-speed, tube, redundancy, conditioning, non-finite, timeout); "
-                     "--compensation-scale=<k> multiplies the experiment's friction feedforward and rotor inertia by "
-                     "k >= 0 (0: as before CTRL-1)\n"
+                     "--before-ctrl1 runs the experiment with the controller as before CTRL-1 (the paper's gains, no "
+                     "friction feedforward, franka::Model's M alone)\n"
 #endif
                   << "exit codes: 0 ok, 1 usage, 2 unknown experiment, 3 kinematics check, 4 preflight, 5 safety "
                      "stop, 6 aborted, 7 not ready / not at the start, 8 libfranka error, 9 log file\n";
@@ -1056,13 +1055,8 @@ namespace {
                 if (opt.inject == Violation::None || end == v.c_str() + at + 1 || *end != '\0'
                     || !(opt.injectTime >= 0.0))
                     return false;
-            } else if (a.rfind("--compensation-scale=", 0) == 0) {
-                const std::string v = a.substr(21);
-                char* end = nullptr;
-                opt.compensationScale = std::strtod(v.c_str(), &end);
-                if (v.empty() || end != v.c_str() + v.size() || !std::isfinite(opt.compensationScale)
-                    || !(opt.compensationScale >= 0.0))
-                    return false;
+            } else if (a == "--before-ctrl1") {
+                opt.beforeCtrl1 = true;
             }
 #endif
             else if (opt.command == "preflight" && a.rfind("--", 0) != 0 && opt.which == "all")
@@ -1121,11 +1115,19 @@ int main(int argc, char** argv)
         if (opt.command == "error-recovery")
             return cmdRecover(robot, opt);
 #ifdef SE3PF_MOCK_FRANKA
-        // Test only: the experiment with its CTRL-1 compensation scaled (0: as before CTRL-1)
-        ExperimentSpec scaled = *spec;
-        scaled.friction = spec->friction.scaled(opt.compensationScale);
-        scaled.rotorInertia = opt.compensationScale * spec->rotorInertia;
-        return cmdRun(robot, example, scaled, opt);
+        // Test only: the experiment with the controller as before CTRL-1 (tests reproduce the stall of 2026-10-19)
+        ExperimentSpec before = *spec;
+        if (opt.beforeCtrl1) {
+            before.friction = FrictionFeedforward();
+            before.rotorInertia.setZero();
+            before.gains = Gains::fromLambda(PandaExample::lambda);
+            before.gains.kt = PandaExample::kt;
+            before.gains.kpEta = 16.0;
+            before.gains.kdEta = 8.0;
+            before.gains.KpBeta = PandaExample::KpBeta;
+            before.gains.KdBeta = PandaExample::KdBeta;
+        }
+        return cmdRun(robot, example, before, opt);
 #else
         return cmdRun(robot, example, *spec, opt);
 #endif

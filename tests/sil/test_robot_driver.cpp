@@ -226,10 +226,8 @@ TEST_CASE("robot_driver_mock: list, usage errors, unknown experiments")
     CHECK(run("0.0.0.0 hold --yes --inject=bogus@1").code == 1);
     CHECK(run("0.0.0.0 hold --yes --inject=tube").code == 1);
     CHECK(run("0.0.0.0 hold --yes --inject=tube@x").code == 1);
-    CHECK(run("0.0.0.0 hold --yes --compensation-scale=").code == 1);
-    CHECK(run("0.0.0.0 hold --yes --compensation-scale=x").code == 1);
-    CHECK(run("0.0.0.0 hold --yes --compensation-scale=-1").code == 1);
-    CHECK(run("0.0.0.0 hold --yes --compensation-scale=0.5x").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --before-ctrl1=1").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --before-ctrl1x").code == 1);
     CHECK(run("0.0.0.0 no-such-experiment --yes").code == 2);
     CHECK(run("0.0.0.0 preflight no-such-experiment").code == 2);
 }
@@ -498,13 +496,13 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
     const double nuD = loops.speed.nuMax;
 
     // 1. The stall of loops_1: the plant with the Coulomb levels of Gaz et al. 2019 and the controller as it ran
-    // then (--compensation-scale=0, mock only: no feedforward, franka::Model's M alone). As on the robot
+    // then (--before-ctrl1, mock only: the paper's gains, no feedforward, franka::Model's M alone). As on the robot
     // (logs/loops_1.csv: eta_dot 1 % of nu_d while cruising, |xi| 0.018, beta 0.030, the wrist never moving under a
     // commanded torque below its friction), the arm stays put: no reflex, no stop, "finished at rest" with the
     // errors frozen.
     {
         const Vec7 plant = FrictionFeedforward::gaz2019().coulomb;
-        const Run r = run("0.0.0.0 loops --yes --compensation-scale=0 " + logArg("stall"), coulombEnv(plant));
+        const Run r = run("0.0.0.0 loops --yes --before-ctrl1 " + logArg("stall"), coulombEnv(plant));
         INFO(r.out);
         CHECK(r.code == 0);
         CHECK(r.contains("friction feedforward: off"));
@@ -534,9 +532,10 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         CHECK(maxTau7 < plant[6]);
         CHECK(maxDdq > 0.10);
     }
-    // 2. The plant with exactly the friction and rotor inertia the spec assumes, without and with the compensation
+    // 2. The plant with exactly the friction and rotor inertia the spec assumes, with the controller before CTRL-1
+    // and with the spec's
     {
-        const Run off = run("0.0.0.0 loops --yes --compensation-scale=0 " + logArg("coulomb_off"), plantEnv(loops));
+        const Run off = run("0.0.0.0 loops --yes --before-ctrl1 " + logArg("coulomb_off"), plantEnv(loops));
         INFO(off.out);
         CHECK(off.code == 0);
         CHECK_FALSE(off.contains("REFLEX"));

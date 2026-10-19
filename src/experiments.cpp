@@ -136,6 +136,13 @@ namespace se3pf {
                 e.speed = {0.05, 4.0, 26.8, 4.0};
                 e.duration = 38.0;
                 e.limits.flangeSpeed = 0.2;
+                // Poles at -6 and k_t = 10 (run loops_6, 2026-10-19, at the paper's -4 and 5: no stop, but the arm
+                // stick-slipped through 0.29 of a loop and stood still from 13 s on, every joint held by 0.5 to
+                // 1.2 N m of static friction). With the wrist's command inertia those breakaway torques need at
+                // most 13 % of the acceleration margin; the slip transients after a breakaway scale with K_d
+                // (14.7 % of the margin at K_d = 8), so K_d grows by 1.5 and K_p by 2.25.
+                e.gains = Gains::fromLambda(6.0);
+                e.gains.kt = 10.0;
                 // Joints 1 to 4: the Gaz et al. 2019 levels (run loops_3, 2026-10-19: joints 2, 3 and 4 followed the
                 // lift with them). The wrist, from loops_2 to loops_4 (2026-10-19): joint 5 broke away at 0.76 N m
                 // commanded and then ran at 0.35 rad/s under 0.80 N m, joint 6 broke away at 0.40 N m and crept,

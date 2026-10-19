@@ -116,13 +116,14 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         // The mu ramp (Rules for the 1 kHz loop: hardware only, T = 1-2 s)
         CHECK(e.rampTime >= 1.0);
         CHECK(e.rampTime <= 2.0);
-        // The paper's poles at -4
-        CHECK(e.gains.Kp == 16.0);
-        CHECK(e.gains.Kd == 8.0);
-        CHECK(e.gains.KpBeta == 16.0);
-        CHECK(e.gains.KdBeta == 8.0);
+        // The paper's poles at -4 and k_t = 5, except loops: poles at -6 and k_t = 10 (CTRL-1, 2026-10-19)
+        const double lambda = e.name == "loops" ? 6.0 : 4.0;
+        CHECK(e.gains.Kp == lambda * lambda);
+        CHECK(e.gains.Kd == 2.0 * lambda);
+        CHECK(e.gains.KpBeta == lambda * lambda);
+        CHECK(e.gains.KdBeta == 2.0 * lambda);
         if (e.mode == TangentialReference::Mode::Velocity) {
-            CHECK(e.gains.kt == 5.0);
+            CHECK(e.gains.kt == (e.name == "loops" ? 10.0 : 5.0));
             CHECK(e.speed.end() <= e.duration);
             CHECK(e.speed.rampUp >= 2.0);  // smooth start
             CHECK(e.speed.rampDown >= 4.0);  // ends at rest
@@ -407,7 +408,7 @@ TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift a
     // The rotor inertia: tau = (M + diag(Jr)) qdd* + c + tau_f; the preflight's motion is unchanged
     {
         ExperimentSpec e = spec("loops");
-        e.rotorInertia = (Vec7() << 0.5, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0).finished();
+        e.rotorInertia = (Vec7() << 0.05, 0.0, 0.0, 0.0, 0.05, 0.1, 0.1).finished();
         const ExperimentSetup es(ex, e);
         ExperimentLoop loop(es, es.monitor());
         ExperimentLoop::Cycle c;
