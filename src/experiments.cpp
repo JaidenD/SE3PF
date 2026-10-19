@@ -37,6 +37,41 @@ namespace se3pf {
     }
 
     // ---------------------------------------------------------------------------------------------------------
+    // FrictionFeedforward
+
+    bool FrictionFeedforward::active() const
+    {
+        return (coulomb.array() != 0.0).any() || (viscous.array() != 0.0).any();
+    }
+
+    Vec7 FrictionFeedforward::torque(const Vec7& v) const noexcept
+    {
+        Vec7 tau = Vec7::Zero();
+        for (int i = 0; i < 7; ++i)
+            tau[i] = coulomb[i] * std::tanh(v[i] / velocityScale) + viscous[i] * v[i];
+        return tau;
+    }
+
+    FrictionFeedforward FrictionFeedforward::scaled(double k) const
+    {
+        FrictionFeedforward f = *this;
+        f.coulomb = k * coulomb;
+        f.viscous = k * viscous;
+        return f;
+    }
+
+    FrictionFeedforward FrictionFeedforward::gaz2019()
+    {
+        FrictionFeedforward f;
+        // phi1 of the sigmoid, joints 1 to 7 (FI_11 ... FI_17 of the paper's code); Fc = phi1 / 2, the mean of
+        // the sigmoid's two asymptotes (experiments.hpp)
+        f.coulomb = 0.5 * (Vec7() << 0.54615, 0.87224, 0.64068, 1.2794, 0.83904, 0.30301, 0.56489).finished();
+        f.viscous = Vec7::Zero();
+        f.velocityScale = 0.01;
+        return f;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
     // The catalog
 
     namespace {
@@ -86,14 +121,18 @@ namespace se3pf {
                             "cruises for 26.8 s and falls back to 0 over 4 s (two loops of L = 0.770 if eta_dot "
                             "followed nu_d exactly), then 3.2 s at rest. With beta = 0 the arm follows the closed "
                             "lift q*: the same configuration at the same point of the path in every loop.";
-                e.watch = "Pass: no safety stop, |xi| below 2e-2, |beta| below 3e-2 rad. Friction makes eta_dot lag "
-                          "nu_d (MuJoCo with 1 N m s/rad of joint damping: 0.035 instead of 0.05 while cruising, "
-                          "|xi| 8e-3, |beta| 1e-2 rad), so the arm covers fewer than two loops. This run measures "
-                          "the robot's friction: if |beta| exceeds 3e-2 here, expect 'paper' to stop at its 0.05 rad "
-                          "margin.";
+                e.watch = "Pass: no safety stop, |xi| below 2e-2, |beta| below 3e-2 rad, eta_dot near nu_d while "
+                          "cruising. Friction: on 2026-10-19 the arm stalled here without compensation (eta_dot 1 % "
+                          "of nu_d; |xi| 0.018 and beta 0.030 held by static friction: inside the acceleration "
+                          "margin the wrist joints can deliver only 0.02 to 0.06 N m), so the friction feedforward "
+                          "tau_f (half the Coulomb levels of Gaz et al. 2019) is on. If the arm still stalls, raise "
+                          "it towards the full levels. An Acceleration stop on a wrist joint soon after the motion "
+                          "starts means tau_f exceeds that joint's friction: lower it. If |beta| exceeds 3e-2 here, "
+                          "expect 'paper' to stop at its 0.05 rad margin.";
                 e.speed = {0.05, 4.0, 26.8, 4.0};
                 e.duration = 38.0;
                 e.limits.flangeSpeed = 0.2;
+                e.friction = FrictionFeedforward::gaz2019().scaled(0.5);
                 v.push_back(e);
             }
             {
@@ -245,6 +284,12 @@ namespace se3pf {
                 if (!(p.end() <= s.duration))
                     throw std::invalid_argument("ExperimentSetup: the speed profile must end by the duration");
             }
+            const FrictionFeedforward& f = s.friction;
+            if (!f.coulomb.allFinite() || !f.viscous.allFinite() || (f.coulomb.array() < 0.0).any()
+                || (f.viscous.array() < 0.0).any())
+                throw std::invalid_argument("ExperimentSetup: the friction feedforward needs finite Fc and Fv >= 0");
+            if (!std::isfinite(f.velocityScale) || !(f.velocityScale > 0.0))
+                throw std::invalid_argument("ExperimentSetup: the friction feedforward needs a velocity scale > 0");
             return s;
         }
     }  // namespace
@@ -273,6 +318,15 @@ namespace se3pf {
             });
     }
 
+    double ExperimentSetup::referenceSpeed(double t) const
+    {
+        if (spec_.mode == TangentialReference::Mode::Position)
+            return 0.0;  // eta_d = s0 (reference()): the point does not move
+        double nu = 0.0, dnuDt = 0.0;
+        spec_.speed.eval(t, nu, dnuDt);
+        return nu;
+    }
+
     Controller<PandaArm> ExperimentSetup::controller() const
     {
         Controller<PandaArm> c(example_.tube(), spec_.gains, reference(), &example_.redundancy());
@@ -295,6 +349,7 @@ namespace se3pf {
         out.finished = false;
         out.tau.setZero();
         out.tauG.setZero();
+        out.tauF.setZero();
         out.qdd.setZero();
 
         if (!q.allFinite() || !dq.allFinite() || !std::isfinite(t)) {
@@ -317,9 +372,18 @@ namespace se3pf {
             v = monitor_.checkState(q, dq);
         if (v == Violation::None)
             v = monitor_.checkAcceleration(qdd);
+        // The friction feedforward of the reference motion: v = q*'(eta) eta_dot_ref (FrictionFeedforward)
+        const FrictionFeedforward& friction = setup_.spec().friction;
+        if (friction.active()) {
+            Vec7 qStar = Vec7::Zero(), dqStar = Vec7::Zero();
+            setup_.example().lift().eval(out.status.eta, qStar, &dqStar);
+            out.tauF = friction.torque(Vec7(dqStar * setup_.referenceSpeed(t)));
+            if (v == Violation::None && !out.tauF.allFinite())
+                v = Violation::NonFinite;
+        }
         if (model) {
-            // eq:fb without G: the robot adds its own G (with the configured load)
-            out.tau = model->M * qdd + model->c;
+            // eq:fb without G (the robot adds its own G, with the configured load), plus the friction feedforward
+            out.tau = model->M * qdd + model->c + out.tauF;
             out.tauG = out.tau + model->G;
             if (v == Violation::None)
                 v = monitor_.checkTorque(out.tauG, out.tau, tauPrev_, RunConstants::dt);
@@ -353,7 +417,7 @@ namespace se3pf {
     // Logs
 
     ExperimentLogRow makeLogRow(double t, int phase, const ExperimentLoop::Status& st, const Vec7& q, const Vec7& dq,
-                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG)
+                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG, const Vec7& tauF)
     {
         ExperimentLogRow r;
         r.t = t;
@@ -374,6 +438,7 @@ namespace se3pf {
         r.qdd = qdd;
         r.tau = tau;
         r.tauG = tauG;
+        r.tauF = tauF;
         return r;
     }
 
@@ -410,6 +475,11 @@ namespace se3pf {
             maxTauRate = std::max(maxTauRate, (r.tau - tauPrev_).cwiseAbs().maxCoeff() / RunConstants::dt);
             tauPrev_ = r.tau;
         }
+        const double tauF = r.tauF.cwiseAbs().maxCoeff(&j);
+        if (tauF > maxTauF) {
+            maxTauF = tauF;
+            maxTauFJoint = j;
+        }
         Mat67 Jb = Mat67::Zero();
         PandaArm::output(r.q, &Jb);
         const Vec6 zeta = Jb * r.dq;
@@ -437,12 +507,13 @@ namespace se3pf {
             std::snprintf(torque, sizeof(torque), " | torque not checked (no dynamics model)");
         std::snprintf(buf, sizeof(buf),
                       "joint margin %.3f rad (joint %d) [>= %.2f] | |qd| %.1f %% (joint %d) [%.0f %%] | |qdd*| %.1f %% "
-                      "(joint %d) [%.0f %%]%s | flange %.3f m/s [%.2f] | |xi| %.4f [%.3f] | |beta| %.4f rad [%.3f] | "
-                      "sigma_min(A) %.4f [>= %.0e] | Newton <= %d | final |xi| %.1e, beta %.1e",
+                      "(joint %d) [%.0f %%]%s | tau_f <= %.2f N m (joint %d) | flange %.3f m/s [%.2f] | |xi| %.4f "
+                      "[%.3f] | |beta| %.4f rad [%.3f] | sigma_min(A) %.4f [>= %.0e] | Newton <= %d | final |xi| "
+                      "%.1e, beta %.1e",
                       minJointMargin, minMarginJoint + 1, b.jointMargin, 100.0 * maxDqFrac, maxDqJoint + 1,
-                      100.0 * b.dqFrac, 100.0 * maxDdqFrac, maxDdqJoint + 1, 100.0 * b.ddqFrac, torque,
-                      maxFlangeSpeed, b.flangeSpeed, maxXi, b.xi, maxBeta, b.beta, minSigma, b.sigmaMin, maxNewton,
-                      finalXi, finalBeta);
+                      100.0 * b.dqFrac, 100.0 * maxDdqFrac, maxDdqJoint + 1, 100.0 * b.ddqFrac, torque, maxTauF,
+                      maxTauFJoint + 1, maxFlangeSpeed, b.flangeSpeed, maxXi, b.xi, maxBeta, b.beta, minSigma,
+                      b.sigmaMin, maxNewton, finalXi, finalBeta);
         return buf;
     }
 

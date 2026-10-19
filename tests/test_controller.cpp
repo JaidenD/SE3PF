@@ -1245,6 +1245,11 @@ TEST_CASE("ExperimentLoop::follow, observe, the safety stop and the safety check
     REQUIRE(qds.back().norm() > 0.01);  // moving
 
     ExperimentLoop loop(setup, monitor);
+    // ... and the same cycle with the friction feedforward on (the lift's spline and tanh at every cycle: CTRL-1)
+    ExperimentSpec withFriction = *spec;
+    withFriction.friction = FrictionFeedforward::gaz2019();
+    const ExperimentSetup setupF(ex, withFriction);
+    ExperimentLoop loopF(setupF, monitor);
     ModelTerms terms;
     terms.M = 2.0 * Mat<7, 7>::Identity();
     terms.c = Vec7::Constant(0.01);
@@ -1266,6 +1271,9 @@ TEST_CASE("ExperimentLoop::follow, observe, the safety stop and the safety check
         loop.follow(1.49 + 0.001 * k, qs[k % 10], qds[k % 10], &terms, c);
         violations += c.violation == Violation::None ? 0 : 1;
         sink += c.tau[0] + SafetyStop::torque(qs[k % 10], qds[k % 10], qs[0])[1];
+        loopF.follow(1.49 + 0.001 * k, qs[k % 10], qds[k % 10], &terms, c);
+        violations += c.violation == Violation::None ? 0 : 1;
+        sink += c.tauF[4];
         sink += stop.step(1.49 + 0.001 * k, qs[k % 10], qds[k % 10], stopDone)[2];
         sink += loop.observe(qs[k % 10], qds[k % 10], st) ? st.xi[0] : 1.0;
         violations += monitor.checkOutputs(xi, 0.001, 0.05) == Violation::None ? 0 : 1;

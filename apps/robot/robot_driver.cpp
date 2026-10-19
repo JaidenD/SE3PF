@@ -3,8 +3,9 @@
 // The only code of the project that includes libfranka. The same source builds two programs:
 //   robot_driver       against the real libfranka 0.9.2 (cmake -DSE3PF_WITH_LIBFRANKA=ON -DFranka_DIR=...);
 //   robot_driver_mock  against mock/franka (always built with the tests; software in the loop), with the test-only
-//                      options --yes (answers every prompt) and --inject (forces a violation), compiled only into
-//                      the mock build (SE3PF_MOCK_FRANKA).
+//                      options --yes (answers every prompt), --inject (forces a violation) and --friction-scale
+//                      (scales the experiment's friction feedforward), compiled only into the mock build
+//                      (SE3PF_MOCK_FRANKA).
 //
 // Usage:
 //   robot_driver list                                          the experiments, in the order to run them
@@ -35,7 +36,8 @@
 //      start (printed next to their bounds); and the preflight again, from the measured start configuration;
 //   8. Enter; the state is read again and step 7 repeated; the 1 kHz torque loop: ExperimentLoop::follow (the
 //      preflight's cycle: Controller::step, then the safety monitor's checks), tau = M(q) qdd* + C(q, qd) qd from
-//      franka::Model (the robot adds G), sent with libfranka's rate limiter and low-pass filter.
+//      franka::Model (the robot adds G) plus the experiment's friction feedforward tau_f (CTRL-1), sent with
+//      libfranka's rate limiter and low-pass filter.
 // On any violation, or a failed step, the loop switches to the safety stop (SafetyStop, se3pf/experiments.hpp): a
 // damped hold at the configuration of the violation, tau = -K_s (q - q_stop) - D qd, until the arm has been at rest
 // (|qd| < 0.01 rad/s) for 0.1 s, or for at most 2 s; then the loop ends and the robot's own controller takes the arm.
@@ -166,6 +168,7 @@ namespace {
         bool yes = false;          // mock build only: answer every prompt
         Violation inject = Violation::None;  // mock build only: force this violation from injectTime on ...
         double injectTime = 0.0;             // ... s after the torque loop started
+        double frictionScale = 1.0;          // mock build only: the spec's friction feedforward times this (0: off)
     };
 
     void usage(const char* prog)
@@ -179,7 +182,8 @@ namespace {
 #ifdef SE3PF_MOCK_FRANKA
                   << "  (mock build) --yes answers every prompt; --inject=<violation>@<t> forces that violation t s "
                      "into the torque loop (violations: projection, joint-limit, joint-velocity, acceleration, "
-                     "torque, torque-rate, flange-speed, tube, redundancy, conditioning, non-finite, timeout)\n"
+                     "torque, torque-rate, flange-speed, tube, redundancy, conditioning, non-finite, timeout); "
+                     "--friction-scale=<k> multiplies the experiment's friction feedforward by k >= 0\n"
 #endif
                   << "exit codes: 0 ok, 1 usage, 2 unknown experiment, 3 kinematics check, 4 preflight, 5 safety "
                      "stop, 6 aborted, 7 not ready / not at the start, 8 libfranka error, 9 log file\n";
@@ -256,6 +260,19 @@ namespace {
             s += buf;
         }
         return s + ")";
+    }
+
+    // The friction feedforward of an experiment (FrictionFeedforward), for list and before a run
+    void printFriction(const ExperimentSpec& e, const char* indent)
+    {
+        if (!e.friction.active()) {
+            std::printf("%sfriction feedforward: off\n", indent);
+            return;
+        }
+        std::printf("%sfriction feedforward tau_f = Fc tanh(v / v0) + Fv v, v = q*'(eta) nu_d(t) (the reference "
+                    "velocity along the lift):\n%s  Fc = %s N m, Fv = %s N m s/rad, v0 = %.3f rad/s\n",
+                    indent, indent, vecString(e.friction.coulomb, 3).c_str(), vecString(e.friction.viscous, 3).c_str(),
+                    e.friction.velocityScale);
     }
 
     const char* modeName(franka::RobotMode m)
@@ -555,7 +572,7 @@ namespace {
     bool atStart(const franka::RobotState& s, const ExperimentSetup& setup, bool verbose)
     {
         const ExperimentSpec& spec = setup.spec();
-        const SafetyLimits& b = setup.monitor().limits();
+        const SafetyLimits b = setup.monitor().limits();  // a copy: monitor() returns a temporary
         const ExperimentLoop probe(setup, setup.monitor());
         ExperimentLoop::Status st;
         const Vec7 q = vec7(s.q), dq = vec7(s.dq);
@@ -652,7 +669,7 @@ namespace {
             const auto start = std::chrono::steady_clock::now();
             t += period.toSec();
             const Vec7 q = vec7(s.q), dq = vec7(s.dq);
-            Vec7 tau = Vec7::Zero(), tauG = Vec7::Zero(), qdd = Vec7::Zero();
+            Vec7 tau = Vec7::Zero(), tauG = Vec7::Zero(), qdd = Vec7::Zero(), tauF = Vec7::Zero();
             ExperimentLoop::Status st;
             bool done = false;
             bool violatedNow = false;
@@ -678,6 +695,7 @@ namespace {
                 } else {
                     tau = cycle.tau;
                     tauG = cycle.tauG;
+                    tauF = cycle.tauF;
                     done = cycle.finished;
                     res.finished = done;
                 }
@@ -699,7 +717,7 @@ namespace {
             res.tEnd = t;
             if (res.rows < log.size()) {
                 ExperimentLogRow& row = log[res.rows++];
-                row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, tauG);
+                row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, tauG, tauF);
                 row.periodMs = static_cast<double>(period.toMSec());
                 row.successRate = s.control_command_success_rate;
                 row.computeUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
@@ -768,6 +786,7 @@ namespace {
         for (const ExperimentSpec& e : experiments()) {
             std::printf("%d. %-12s %s (%.0f s + time to rest)\n   %s\n   Watch: %s\n", k++, e.name.c_str(),
                         e.title.c_str(), e.duration, e.purpose.c_str(), e.watch.c_str());
+            printFriction(e, "   ");
         }
         return kOk;
     }
@@ -830,6 +849,7 @@ namespace {
                     spec.purpose.c_str(), spec.watch.c_str());
         std::printf("  start q0 = %s rad (|xi0| = %.4f, beta0 = %.3f rad), %.1f s + time to rest\n",
                     vecString(setup.start()).c_str(), spec.xi0.norm(), spec.beta0, spec.duration);
+        printFriction(spec, "  ");
 
         // 1. The log, before anything else: a run whose log cannot be written must not move the robot
         if (!checkLogPath(logPath, opt.overwrite))
@@ -1010,6 +1030,13 @@ namespace {
                 if (opt.inject == Violation::None || end == v.c_str() + at + 1 || *end != '\0'
                     || !(opt.injectTime >= 0.0))
                     return false;
+            } else if (a.rfind("--friction-scale=", 0) == 0) {
+                const std::string v = a.substr(17);
+                char* end = nullptr;
+                opt.frictionScale = std::strtod(v.c_str(), &end);
+                if (v.empty() || end != v.c_str() + v.size() || !std::isfinite(opt.frictionScale)
+                    || !(opt.frictionScale >= 0.0))
+                    return false;
             }
 #endif
             else if (opt.command == "preflight" && a.rfind("--", 0) != 0 && opt.which == "all")
@@ -1067,7 +1094,14 @@ int main(int argc, char** argv)
             return cmdPreflight(robot, example, opt);
         if (opt.command == "error-recovery")
             return cmdRecover(robot, opt);
+#ifdef SE3PF_MOCK_FRANKA
+        // Test only: the experiment with its friction feedforward scaled (0: without it, as before CTRL-1)
+        ExperimentSpec scaled = *spec;
+        scaled.friction = spec->friction.scaled(opt.frictionScale);
+        return cmdRun(robot, example, scaled, opt);
+#else
         return cmdRun(robot, example, *spec, opt);
+#endif
     } catch (const franka::IncompatibleVersionException& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "%s\n", e.what());

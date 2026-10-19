@@ -6,9 +6,9 @@
 // Columns, one row per control cycle (joints numbered from 1 as on the robot):
 //   t, phase (0 following, 1 safety stop: damped hold), eta, eta_dot, ref (nu_d or eta_d), e_tan, xi1..xi5, xi_norm,
 //   beta, beta_dot, sigma_min, ramp, newton, q1..q7, dq1..dq7, tau1..tau7 (commanded torque, without G),
-//   tauG1..tauG7 (tau + G: the torque the joints deliver), qdd1..qdd7 (qdd*), compute_us, period_ms, success_rate
-//   (the last three are the driver's: time spent in the callback, libfranka's period, and the robot's
-//   control_command_success_rate; 0 in predictions).
+//   tauG1..tauG7 (tau + G: the torque the joints deliver), qdd1..qdd7 (qdd*), tauF1..tauF7 (the friction
+//   feedforward tau_f, part of tau; CTRL-1), compute_us, period_ms, success_rate (the last three are the driver's:
+//   time spent in the callback, libfranka's period, and the robot's control_command_success_rate; 0 in predictions).
 #include "se3pf/experiments.hpp"
 
 #include <cstddef>
@@ -22,7 +22,7 @@ namespace se3pf::robot {
     inline void writeLogHeader(std::ostream& os)
     {
         os << "t,phase,eta,eta_dot,ref,e_tan,xi1,xi2,xi3,xi4,xi5,xi_norm,beta,beta_dot,sigma_min,ramp,newton";
-        for (const char* name : {"q", "dq", "tau", "tauG", "qdd"})
+        for (const char* name : {"q", "dq", "tau", "tauG", "qdd", "tauF"})
             for (int i = 1; i <= 7; ++i)
                 os << ',' << name << i;
         os << ",compute_us,period_ms,success_rate\n";
@@ -35,7 +35,7 @@ namespace se3pf::robot {
             os << ',' << r.xi[i];
         os << ',' << r.xiNorm << ',' << r.beta << ',' << r.betaDot << ',' << r.sigmaMin << ',' << r.ramp << ','
            << r.newton;
-        for (const Vec7* v : {&r.q, &r.dq, &r.tau, &r.tauG, &r.qdd})
+        for (const Vec7* v : {&r.q, &r.dq, &r.tau, &r.tauG, &r.qdd, &r.tauF})
             for (int i = 0; i < 7; ++i)
                 os << ',' << (*v)[i];
         os << ',' << r.computeUs << ',' << r.periodMs << ',' << r.successRate << '\n';

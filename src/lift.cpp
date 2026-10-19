@@ -38,8 +38,18 @@ namespace se3pf {
         // Smallest singular value of J_b (Assumption 1: J_b(q*(s)) has full rank)
         double sigmaMin(const Mat67& J)
         {
+            // GCC 13 with -O3 reports the singular values as "maybe uninitialized" (a false positive of its
+            // vectorized reduction, as in Controller::step); silenced for that compiler only (tools/ci.sh, lab PC)
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
             const JacobiSVD<Mat67> svd(J);
-            return svd.singularValues().minCoeff();
+            const double sigma = svd.singularValues().minCoeff();
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+            return sigma;
         }
 
         // One node of the lift: projected Newton steps from q until the stopping rule holds (Offline: the lift q*).

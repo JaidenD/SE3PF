@@ -110,7 +110,7 @@ namespace se3pf {
                 terms.c = biasP - terms.G;
             }
 
-            Vec7 tau = Vec7::Zero(), qdd = Vec7::Zero();
+            Vec7 tau = Vec7::Zero(), qdd = Vec7::Zero(), tauF = Vec7::Zero();
             ExperimentLoop::Status st;
             bool done = false;
             if (!stopping) {
@@ -124,6 +124,7 @@ namespace se3pf {
                     stop.begin(t, q);
                 } else {
                     tau = cycle.tau;
+                    tauF = cycle.tauF;
                     done = cycle.finished;
                     run.finished = done;
                 }
@@ -139,7 +140,7 @@ namespace se3pf {
             sent = options.filter ? libfrankaCommand(tau, sent) : tau;
             const Vec7 delivered = sent + terms.G;  // the robot adds G
             // Logged as the driver logs it: the command before libfranka's filter, and that command plus G
-            ExperimentLogRow row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, Vec7(tau + terms.G));
+            ExperimentLogRow row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, Vec7(tau + terms.G), tauF);
             row.periodMs = 1.0;
             run.peaks.add(row);
             run.log.push_back(row);

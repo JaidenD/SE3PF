@@ -33,6 +33,48 @@ namespace se3pf {
         void eval(double t, double& nu, double& dnuDt) const;
     };
 
+    // Joint friction feedforward (CTRL-1). On the robot (HW-3, 2026-10-19) 'loops' stalled: from t = 6 s no joint
+    // moved while the feedback held 0.26 to 1.1 N m on joints 1 to 4 and 0.001 to 0.05 N m on the wrist (logs/
+    // loops_1.csv). In franka::Model the wrist joints have M_ii of 0.013 (joint 5), 0.044 (6) and 0.003 kg m^2 (7),
+    // so inside the 30 % acceleration margin the feedback can deliver only 0.06, 0.26 and 0.02 N m there, below any
+    // static friction, and the controller has no integral action: higher gains only reach the acceleration margin
+    // sooner (logs/loops_k8_1.csv: Acceleration stop at 3.2 s on joint 5). The feedforward
+    //     tau_f,i = Fc_i tanh(v_i / v0) + Fv_i v_i,     v = q*'(eta) eta_dot_ref,
+    // adds the friction of the motion the reference asks for: v is the joint velocity along the lift at the
+    // reference speed (nu_d(t) for a velocity reference; the position references hold a point, so v = 0). v is a
+    // smooth function of t and of the projected eta, never of the measured (noisy) qd, so tau_f cannot chatter, it
+    // starts from exactly zero with the speed profile, and it reverses smoothly over +-v0 where a joint of the lift
+    // turns around. It is part of the commanded torque: the torque and torque-rate checks, the preflight and the
+    // logs (tauF) all see it; the safety stop does not use it. A tau_f below a joint's true static friction can never
+    // move that joint by itself (static friction absorbs it); one above it pushes the joint, which the feedback must
+    // then hold back within the acceleration margin, so the values start conservative (half of Gaz et al. 2019,
+    // which the robot's joints 1, 2 and 4 exceeded) and are raised from the logs. Fc, Fv >= 0 and v0 > 0 (checked
+    // by ExperimentSetup).
+    struct FrictionFeedforward {
+        Vec7 coulomb = Vec7::Zero();   // Fc, N m
+        Vec7 viscous = Vec7::Zero();   // Fv, N m s/rad
+        double velocityScale = 0.01;   // v0, rad/s: tanh(v / v0) is 0.76 at v = v0 and 0.995 at v = 3 v0
+
+        bool active() const;  // any Fc or Fv not zero
+        // tau_f at the reference joint velocity v. Online: no allocation, no exceptions (a non-finite v gives a
+        // non-finite torque, which ExperimentLoop reports as NonFinite).
+        Vec7 torque(const Vec7& v) const noexcept;
+        // Fc and Fv multiplied by k (v0 unchanged); k = 0 turns the feedforward off.
+        FrictionFeedforward scaled(double k) const;
+
+        // The Coulomb levels of the Panda from Gaz, Cognetti, Oliva, Robuffo Giordano and De Luca, "Dynamic
+        // identification of the Franka Emika Panda robot with retrieval of feasible parameters using penalty-based
+        // optimization", IEEE RA-L 4(4), 2019 (parameters as published with the paper's code, get_FrictionTorque).
+        // Their friction model is the sigmoid
+        //     tau_f,i = phi1_i / (1 + exp(-phi2_i (qd_i + phi3_i))) - phi1_i / (1 + exp(-phi2_i phi3_i)),
+        // whose two asymptotes are phi1_i sigma(-+ phi2_i phi3_i) with sigma the logistic function; their mean is
+        // phi1_i / 2, the Fc here (the asymmetry, up to 23 %, is dropped): (0.273, 0.436, 0.320, 0.640, 0.420,
+        // 0.152, 0.282) N m. The sigmoid saturates, so Fv = 0: its slope at rest, 0.7 to 1.9 N m s/rad, is the
+        // width of its transition (1 / phi2 = 0.06 to 0.2 rad/s), not a viscous coefficient; the robot's joints
+        // stuck under torques above these levels (joint 2: 1.1 N m), so the transition here is sharper, v0 = 0.01.
+        static FrictionFeedforward gaz2019();
+    };
+
     // One hardware experiment. A run starts at rest at the configuration with pose Psi(s0, xi0) and beta = beta0
     // (s0 = PandaExample::s0 = 0.1), and the reference ends at `duration` (T); the run then lasts until the arm is at
     // rest (|qd| < RunConstants::restSpeed), or fails with a Timeout at T + RunConstants::timeoutExtra.
@@ -54,6 +96,7 @@ namespace se3pf {
         Gains gains;
         double rampTime = 1.0;  // T of the mu ramp (Controller::setRampTime), s
         SafetyLimits limits;    // the monitor's values; only tighter than HardwareBounds take effect
+        FrictionFeedforward friction;  // tau_f of the reference motion; zero (the default): no feedforward
     };
 
     // The experiments in the order the lab runs them: hold, loops, recover, paper, self-motion.
@@ -125,8 +168,9 @@ namespace se3pf {
     // An experiment made concrete with the Panda example: its start configuration, its tangential reference and its
     // controller. Keeps a reference to the example, which must outlive it (and every controller it builds).
     // Construction is offline: throws std::invalid_argument for an invalid spec (duration not finite and positive,
-    // a speed profile longer than the duration or with negative times, a negative ramp time), and std::runtime_error
-    // if no start configuration exists.
+    // a speed profile longer than the duration or with negative times, a negative ramp time, a friction feedforward
+    // with a negative or non-finite Fc or Fv or a velocity scale that is not positive), and std::runtime_error if no
+    // start configuration exists.
     class ExperimentSetup {
         public:
             ExperimentSetup(const PandaExample& example, const ExperimentSpec& spec);
@@ -141,6 +185,9 @@ namespace se3pf {
 
             // nu_d(t) of the speed profile (Velocity), or eta_d(t) = s0 (Position)
             TangentialReference reference() const;
+            // The speed the reference asks for at t: nu_d(t) (Velocity), or d eta_d / dt = 0 (Position: eta_d = s0
+            // holds a point of the path). The friction feedforward's eta_dot_ref. Online.
+            double referenceSpeed(double t) const;
             // Controller<PandaArm> with the example's tube and beta, the spec's gains, reference() and the mu ramp,
             // reset to eta-hat = s0. Every user (driver, preflight, MuJoCo) builds its controller here.
             Controller<PandaArm> controller() const;
@@ -173,7 +220,8 @@ namespace se3pf {
                 Violation violation = Violation::None;
                 bool finished = false;      // t >= T, |qd| < restSpeed, no violation: send tau and end the run
                 Vec7 qdd = Vec7::Zero();    // qdd* = A^-1 (mu - Adot qd)
-                Vec7 tau = Vec7::Zero();    // commanded torque M qdd* + c (what libfranka is sent; it adds G)
+                Vec7 tauF = Vec7::Zero();   // the friction feedforward tau_f (FrictionFeedforward; zero if off)
+                Vec7 tau = Vec7::Zero();    // commanded torque M qdd* + c + tau_f (what libfranka is sent; it adds G)
                 Vec7 tauG = Vec7::Zero();   // tau + G, the torque the joints deliver
                 Status status;
             };
@@ -187,10 +235,11 @@ namespace se3pf {
 
             // One cycle at time t (t = 0 at the first cycle) from the measured q and qd, and the model terms at
             // (q, qd), or nullptr (kinematic only: tau = tauG = 0 and no torque check). In order: finite q and qd
-            // (NonFinite), Controller::step (Projection), checkOutputs, checkState, checkAcceleration, then with a
-            // model tau = M qdd* + c and checkTorque(tau + G, tau, tau of the previous cycle (0 before the first),
-            // dt), then Timeout (t > T + timeoutExtra), then finished. The first violation is reported; after one,
-            // the caller switches to the safety stop (SafetyStop) and calls follow no more.
+            // (NonFinite), Controller::step (Projection), checkOutputs, checkState, checkAcceleration, the friction
+            // feedforward tau_f of the spec at v = q*'(eta) referenceSpeed(t) (NonFinite if it is not finite), then
+            // with a model tau = M qdd* + c + tau_f and checkTorque(tau + G, tau, tau of the previous cycle (0
+            // before the first), dt), then Timeout (t > T + timeoutExtra), then finished. The first violation is
+            // reported; after one, the caller switches to the safety stop (SafetyStop) and calls follow no more.
             void follow(double t, const Vec7& q, const Vec7& dq, const ModelTerms* model, Cycle& out);
 
             // Outputs at q with eta_dot and beta_dot from qd, for the log of the stopping phase (no reference, no
@@ -224,8 +273,9 @@ namespace se3pf {
         int newton = 0;             // Newton updates of the projection
         Vec7 q = Vec7::Zero(), dq = Vec7::Zero();
         Vec7 qdd = Vec7::Zero();    // qdd* (zero in the stopping phase)
-        Vec7 tau = Vec7::Zero();    // commanded torque (M qdd* + c, or the stop's -K_s (q - q_stop) - D qd)
+        Vec7 tau = Vec7::Zero();    // commanded torque (M qdd* + c + tau_f, or the stop's -K_s (q - q_stop) - D qd)
         Vec7 tauG = Vec7::Zero();   // tau + G
+        Vec7 tauF = Vec7::Zero();   // the friction feedforward tau_f in tau (zero in the stopping phase)
         double computeUs = 0.0;     // driver only: time spent in the callback, microseconds
         double periodMs = 0.0;      // driver only: libfranka's period of this callback, ms
         double successRate = 0.0;   // driver only: RobotState::control_command_success_rate
@@ -233,7 +283,7 @@ namespace se3pf {
 
     // A row from one following cycle (phase 0) or from the outputs observed in the stopping phase (phase 1).
     ExperimentLogRow makeLogRow(double t, int phase, const ExperimentLoop::Status& st, const Vec7& q, const Vec7& dq,
-                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG);
+                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG, const Vec7& tauF);
 
     // The peaks of a run over its following rows (phase 0), as the preflight reports them, measured the way the
     // SafetyMonitor checks them. Joints are zero-based. Offline (add evaluates the kinematics for the flange speed).
@@ -249,6 +299,8 @@ namespace se3pf {
         double maxTauFrac = 0.0;         // max_i |tau_i + G_i| / tauMax_i
         int maxTauJoint = -1;
         double maxTauRate = 0.0;         // max_i |tau_i - tau_i,prev| / dt of the commanded torque, N m/s
+        double maxTauF = 0.0;            // max_i |tau_f,i|, N m (the friction feedforward; with or without torques)
+        int maxTauFJoint = -1;
         double maxFlangeSpeed = 0.0;     // m/s
         double maxXi = 0.0;              // max |xi|
         double maxBeta = 0.0;            // max |beta|, rad

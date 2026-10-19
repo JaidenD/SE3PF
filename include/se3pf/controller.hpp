@@ -301,7 +301,17 @@ namespace se3pf {
 
                 // Step 9 (the controller's part of eq:fb): qdd* = A^-1 (mu - Adot qdot). The LU factorization does
                 // not see rank loss (a nearly singular A gives huge but finite values), so check sigma_min first.
+                // (GCC 13 with -O3 reports Eigen's singular values as "maybe uninitialized" here, a false positive
+                // of its vectorized reduction: JacobiSVD::compute fills all of them for a finite A, and A is finite
+                // after outputs. Silenced for that compiler only, so tools/ci.sh builds warning-free on the lab PC.)
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
                 const double sigmaMin = Eigen::JacobiSVD<MatN>(out.A).singularValues().minCoeff();
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
                 if (!(sigmaMin >= 1e-9))  // also NaN
                     return false;
                 const VecN result = out.A.partialPivLu().solve(mu - Adq);

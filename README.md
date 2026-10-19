@@ -59,7 +59,7 @@ Catch2 v3.5.2 (or pass `-DFETCHCONTENT_SOURCE_DIR_CATCH2=<a local Catch2 source 
 ```bash
 cmake -S . -B build-rel -DCMAKE_BUILD_TYPE=Release && cmake --build build-rel -j
 ./build-rel/tests                    # 153 test cases, about 7 s
-./build-rel/tests_sil                # 10 test cases, about 45 s: the robot driver against the mock libfranka
+./build-rel/tests_sil                # 11 test cases, about 70 s: the robot driver against the mock libfranka
 cmake -S . -B build-dbg -DCMAKE_BUILD_TYPE=Debug && cmake --build build-dbg -j
 ./build-dbg/tests                    # 145 test cases, about 1 min: Eigen's checks and the no-allocation tests
 bash tools/ci.sh                     # what every change must pass (below)

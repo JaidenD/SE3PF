@@ -17,7 +17,8 @@ What the simulated robot does (`mock_arm.h`):
   Newton-Euler equation of the flange body). The torque predictions that matter come from `franka::Model` on the
   robot, and from MuJoCo (`docs/MUJOCO.md`).
 - Torque control as libfranka does it: the command is low-pass filtered (against `tau_J_d`, 100 Hz by default) and
-  rate limited (1000 N m/s), the "robot" adds G of its model, and the plant integrates at 0.5 ms. Reflexes throw
+  rate limited (1000 N m/s), the "robot" adds G of its model, and the plant integrates at 0.5 ms (with viscous and
+  Coulomb joint friction if asked for, `FRANKA_MOCK_FRICTION` and `FRANKA_MOCK_COULOMB`). Reflexes throw
   `franka::ControlException` like the robot: delivered torque above the limits, a joint past its position or velocity
   limit, an external torque above the collision threshold of `setCollisionBehavior`.
 - Joint position motions: the arm follows the command; the first command must equal `q_d`; velocity, acceleration
@@ -41,6 +42,7 @@ Faults and other settings for tests, from environment variables (read when the `
 | --- | --- |
 | `FRANKA_MOCK_PUSH=j,tau,t0,T` | an external torque `tau` (N m) on joint `j` (1-7) from `t0` for `T` seconds after the torque loop starts |
 | `FRANKA_MOCK_FRICTION=d` | viscous joint friction `d` (N m s/rad) in the plant, not in the model |
+| `FRANKA_MOCK_COULOMB=c` or `c1,...,c7` | Coulomb friction (N m) in the plant, every joint or per joint: `-c sign(qd)`, regularized below 1e-4 rad/s and integrated implicitly, so a joint under a net torque below `c` stays put (the stall of 2026-10-19, CTRL-1) |
 | `FRANKA_MOCK_PLANT_LOAD=m` | an extra mass `m` (kg) at the flange in the plant only (an end effector missing in Desk) |
 | `FRANKA_MOCK_Q0=q1,...,q7` | the initial configuration (default: the rest posture) |
 | `FRANKA_MOCK_MODE=idle\|reflex\|user-stopped` | the robot mode reported before any motion |

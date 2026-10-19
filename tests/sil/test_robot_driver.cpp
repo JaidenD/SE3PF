@@ -2,8 +2,9 @@
 // a separate process (robot_driver_mock), as the operator runs robot_driver on the lab PC: every experiment with
 // --yes (the mock-only option that answers the prompts), the operator's answers through standard input, faults
 // injected into the simulated robot through the mock's environment variables (mock/franka/README.md), every kind of
-// violation through the driver's safety stop (--inject, mock only), and the driver's refusals. Checks the exit codes,
-// the output and the CSV logs. A separate test program (tests_sil); the runs take about 30 s in all in Release.
+// violation through the driver's safety stop (--inject, mock only), the friction feedforward against a plant with
+// Coulomb friction (CTRL-1), and the driver's refusals. Checks the exit codes, the output and the CSV logs. A
+// separate test program (tests_sil); the runs take about 45 s in all in Release.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "se3pf/experiments.hpp"
@@ -121,6 +122,49 @@ namespace {
     std::string logArg(const std::string& name) { return "--log=" + (workDir() / (name + ".csv")).string(); }
     fs::path logPath(const std::string& name) { return workDir() / (name + ".csv"); }
 
+    // FRANKA_MOCK_COULOMB=c1,...,c7: the plant's Coulomb friction, e.g. what an experiment's feedforward compensates
+    std::string coulombEnv(const Vec7& c)
+    {
+        std::string env = "FRANKA_MOCK_COULOMB=";
+        for (int i = 0; i < 7; ++i)
+            env += (i ? "," : "") + std::to_string(c[i]);
+        return env;
+    }
+
+    // Mean eta_dot over the cruise of a velocity reference (rows with ref at its maximum), and the mean |dq_i|
+    // there; NaN without such rows
+    struct Cruise {
+        double etaDot = std::nan("");
+        Vec7 meanAbsDq = Vec7::Constant(std::nan(""));
+        double maxXi = 0.0, maxBeta = 0.0;  // over every following row
+    };
+    Cruise cruiseOf(const Csv& log)
+    {
+        Cruise c;
+        double nuMax = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k)
+            nuMax = std::max(nuMax, log.at(k, "ref"));
+        double sum = 0.0;
+        Vec7 dqSum = Vec7::Zero();
+        long n = 0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            if (log.at(k, "phase") != 0.0)
+                continue;
+            c.maxXi = std::max(c.maxXi, log.at(k, "xi_norm"));
+            c.maxBeta = std::max(c.maxBeta, std::abs(log.at(k, "beta")));
+            if (nuMax > 0.0 && log.at(k, "ref") >= 0.999 * nuMax) {
+                sum += log.at(k, "eta_dot");
+                dqSum += log.vec(k, "dq").cwiseAbs();
+                ++n;
+            }
+        }
+        if (n > 0) {
+            c.etaDot = sum / n;
+            c.meanAbsDq = dqSum / n;
+        }
+        return c;
+    }
+
     // The first row of the safety stop (phase 1), or rows.size()
     std::size_t firstStopRow(const Csv& log)
     {
@@ -172,6 +216,10 @@ TEST_CASE("robot_driver_mock: list, usage errors, unknown experiments")
     CHECK(run("0.0.0.0 hold --yes --inject=bogus@1").code == 1);
     CHECK(run("0.0.0.0 hold --yes --inject=tube").code == 1);
     CHECK(run("0.0.0.0 hold --yes --inject=tube@x").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --friction-scale=").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --friction-scale=x").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --friction-scale=-1").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --friction-scale=0.5x").code == 1);
     CHECK(run("0.0.0.0 no-such-experiment --yes").code == 2);
     CHECK(run("0.0.0.0 preflight no-such-experiment").code == 2);
 }
@@ -208,7 +256,10 @@ TEST_CASE("robot_driver_mock: every experiment end to end: approach, torque loop
 {
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const Run r = run("0.0.0.0 " + e.name + " --yes " + logArg(e.name));
+        // The simulated robot has the Coulomb friction the experiment's feedforward compensates (loops: half of
+        // Gaz et al. 2019; the others: none)
+        const bool friction = e.friction.active();
+        const Run r = run("0.0.0.0 " + e.name + " --yes " + logArg(e.name), coulombEnv(e.friction.coulomb));
         INFO(r.out);
         REQUIRE(r.code == 0);
         CHECK(r.contains("Approach done"));
@@ -234,16 +285,39 @@ TEST_CASE("robot_driver_mock: every experiment end to end: approach, torque loop
                 maxXiDiff = std::max(maxXiDiff, std::abs(log.at(k, "xi_norm") - pred.at(k, "xi_norm")));
         }
         // The simulated robot follows the prediction (from the measured start): the differences are the low-pass
-        // filter of the torque command and the torque held over each period
+        // filter of the torque command and the torque held over each period. With Coulomb friction in the plant
+        // (loops) the feedforward cancels it while a joint moves, not while it sticks (the start, each reversal of
+        // a joint of the lift), which the frictionless prediction does not see: |xi| 2e-3, |beta| 6e-3, well inside
+        // the experiment's pass criteria (2e-2, 3e-2), and a small error stays at rest (static friction holds it,
+        // as the robot's did in 'hold').
         CAPTURE(maxXiDiff, maxXi, maxBeta);
-        CHECK(maxXiDiff < 1e-4);  // paper: 2.9e-5, the O(dt) of MuJoCo run B (3.4e-5)
+        CHECK(maxXiDiff < (friction ? 5e-3 : 1e-4));  // paper: 2.9e-5, the O(dt) of MuJoCo run B (3.4e-5)
         CHECK(maxXi <= HardwareBounds::xi);
-        CHECK(maxBeta <= std::max(1e-3, std::abs(e.beta0) + 1e-4));
+        CHECK(maxBeta <= (friction ? 1e-2 : std::max(1e-3, std::abs(e.beta0) + 1e-4)));
         CHECK(log.at(last, "xi_norm") < 1e-3);
-        CHECK(std::abs(log.at(last, "beta")) < 1e-3);
-        // Two loops: the arm ends where it started
+        CHECK(std::abs(log.at(last, "beta")) < (friction ? 5e-3 : 1e-3));
+        // Two loops: the arm ends where it started (with friction, a little short along the path: eta_dot lags
+        // nu_d by about 1 %, so the end is a few hundredths of a radian before the start, on the lift)
         if (e.name == "loops") {
-            CHECK(testing::maxDiff(log.vec(last, "q"), log.vec(0, "q")) < 2e-3);
+            if (friction)
+                CHECK(std::abs(testing::arcDiff(log.at(last, "eta"), 0.1, 0.77008765)) < 0.05);
+            else
+                CHECK(testing::maxDiff(log.vec(last, "q"), log.vec(0, "q")) < 2e-3);
+        }
+        // The friction feedforward in the log: zero at the first cycle, never above Fc + Fv |v|, part of tau
+        if (friction) {
+            const Vec7 fc = e.friction.coulomb;
+            CHECK(log.vec(0, "tauF").isZero());
+            double maxTauF = 0.0;
+            for (std::size_t k = 0; k < log.rows.size(); ++k) {
+                const Vec7 tauF = log.vec(k, "tauF");
+                CHECK((tauF.cwiseAbs().array() <= fc.array() + 1e-9).all());
+                maxTauF = std::max(maxTauF, tauF.cwiseAbs().maxCoeff());
+            }
+            CHECK(maxTauF > 0.9 * fc.maxCoeff());
+            CHECK(r.contains("friction feedforward tau_f"));
+        } else {
+            CHECK(r.contains("friction feedforward: off"));
         }
     }
 }
@@ -395,6 +469,103 @@ TEST_CASE("robot_driver_mock: joint friction (1 N m s/rad, as MuJoCo run C) leav
     CHECK(maxBeta > 1e-2);   // the friction is felt ...
     CHECK(maxBeta < HardwareBounds::beta);  // ... within the margin
     CHECK(minEtaDot < 0.079);  // the path speed lags nu_d = 0.08 (no integral action: CTRL-1)
+}
+
+TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1): loops stalls without the friction "
+          "feedforward and completes with it",
+          SLOW_IN_DEBUG)
+{
+    const ExperimentSpec& loops = *findExperiment("loops");
+    REQUIRE(loops.friction.active());
+    const Vec7 fc = loops.friction.coulomb;  // half of Gaz et al. 2019
+    const double nuD = loops.speed.nuMax;
+
+    // 1. Today's stall: the plant with the full Coulomb levels of Gaz et al. 2019 (twice what the spec
+    // compensates) and no feedforward (--friction-scale=0, mock only: the spec as it ran on the robot). As on the
+    // robot (logs/loops_1.csv: eta_dot 1 % of nu_d while cruising, |xi| 0.018, beta 0.030, the wrist never moving
+    // under a commanded torque below its friction), the arm stays put: no reflex, no stop, "finished at rest" with
+    // the errors frozen.
+    {
+        const Run r = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("stall"), coulombEnv(2.0 * fc));
+        INFO(r.out);
+        CHECK(r.code == 0);
+        CHECK(r.contains("friction feedforward: off"));
+        CHECK_FALSE(r.contains("SAFETY STOP"));
+        CHECK_FALSE(r.contains("REFLEX"));
+        const Csv log = readCsv(logPath("stall"));
+        REQUIRE(log.rows.size() > 30000);
+        const Cruise c = cruiseOf(log);
+        CAPTURE(c.etaDot, c.maxXi, c.maxBeta, c.meanAbsDq.transpose());
+        CHECK(c.etaDot < 0.15 * nuD);      // 7 % here, 1 % on the robot
+        CHECK(c.maxBeta > 0.03);           // 0.049 here, 0.030 on the robot
+        CHECK(c.maxBeta <= HardwareBounds::beta);
+        CHECK(c.maxXi > 0.01);             // 0.019 here, 0.018 on the robot
+        for (int i : {0, 4, 6})            // joints 1, 5 and 7 never move
+            CHECK(c.meanAbsDq[i] < 1e-3);
+        // The commanded torque on the stuck wrist joints stays below their Coulomb level while qdd* asks for more
+        // than 10 % of their acceleration limit: the controller cannot break them free
+        double maxTau5 = 0.0, maxTau7 = 0.0, maxDdq = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            const Vec7 tau = log.vec(k, "tau").cwiseAbs();
+            maxTau5 = std::max(maxTau5, tau[4]);
+            maxTau7 = std::max(maxTau7, tau[6]);
+            maxDdq = std::max(maxDdq, log.vec(k, "qdd").cwiseAbs().cwiseQuotient(PandaArm::ddqMax()).maxCoeff());
+        }
+        CAPTURE(maxTau5, maxTau7, maxDdq);
+        CHECK(maxTau5 < 2.0 * fc[4]);
+        CHECK(maxTau7 < 2.0 * fc[6]);
+        CHECK(maxDdq > 0.10);
+    }
+    // 2. The plant with exactly the friction the spec compensates, without and with the feedforward
+    {
+        const Run off = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("coulomb_off"), coulombEnv(fc));
+        INFO(off.out);
+        CHECK(off.code == 0);
+        CHECK_FALSE(off.contains("REFLEX"));
+        const Cruise c = cruiseOf(readCsv(logPath("coulomb_off")));
+        CAPTURE(c.etaDot, c.maxXi, c.maxBeta);
+        CHECK(c.etaDot < 0.5 * nuD);   // 28 %: the arm lags far behind the reference ...
+        CHECK(c.maxBeta > 0.02);       // ... and |beta| 0.040 reaches what the robot showed (0.030)
+        CHECK(c.maxXi > 5e-3);
+
+        const Run on = run("0.0.0.0 loops --yes " + logArg("coulomb_on"), coulombEnv(fc));
+        INFO(on.out);
+        CHECK(on.code == 0);
+        CHECK(on.contains("Finished at rest."));
+        CHECK_FALSE(on.contains("SAFETY STOP"));
+        CHECK(on.contains("callback allocations: 0"));
+        CHECK(on.contains("tau_f <= 0.32 N m (joint 4)"));
+        const Csv log = readCsv(logPath("coulomb_on"));
+        const Cruise d = cruiseOf(log);
+        CAPTURE(d.etaDot, d.maxXi, d.maxBeta);
+        CHECK(d.etaDot > 0.95 * nuD);  // 99 %
+        CHECK(d.etaDot < 1.05 * nuD);
+        CHECK(d.maxXi < 5e-3);         // 2e-3 (pass criterion 2e-2)
+        CHECK(d.maxBeta < 1e-2);       // 6e-3 (3e-2)
+        for (int i = 0; i < 7; ++i)    // every joint moves along the lift
+            CHECK(d.meanAbsDq[i] > 0.01);
+        // tau_f in the log: within Fc, reaching it on every joint, and smooth (the commanded torque rate stays far
+        // below the 600 N m/s margin)
+        Vec7 maxTauF = Vec7::Zero();
+        double maxRate = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            const Vec7 tauF = log.vec(k, "tauF");
+            CHECK((tauF.cwiseAbs().array() <= fc.array() + 1e-9).all());
+            maxTauF = maxTauF.cwiseMax(tauF.cwiseAbs());
+            if (k > 0)
+                maxRate = std::max(maxRate, (log.vec(k, "tau") - log.vec(k - 1, "tau")).cwiseAbs().maxCoeff() / 1e-3);
+        }
+        CAPTURE(maxTauF.transpose(), maxRate);
+        CHECK((maxTauF.array() > 0.9 * fc.array()).all());
+        CHECK(maxRate < 20.0);  // 3 N m/s
+        // The prediction carries the same feedforward
+        const Csv pred = readCsv(fs::path(logPath("coulomb_on").string() + ".preflight.csv"));
+        REQUIRE(pred.rows.size() > 30000);
+        double predMax = 0.0;
+        for (std::size_t k = 0; k < pred.rows.size(); ++k)
+            predMax = std::max(predMax, pred.vec(k, "tauF").cwiseAbs().maxCoeff());
+        CHECK_THAT(predMax, Catch::Matchers::WithinAbs(fc.maxCoeff(), 1e-3));
+    }
 }
 
 TEST_CASE("robot_driver_mock: late periods (lost packets): the run keeps time and its margins", SLOW_IN_DEBUG)

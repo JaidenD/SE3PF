@@ -3,7 +3,8 @@
 
     python3 tools/plot_robot_log.py LOG.csv [--overlay PRED.csv[:label]]... [--no-preflight] [--out FILE.png]
 
-LOG.csv is a log of robot_driver (or robot_driver_mock); its columns are in apps/robot/robot_log.hpp. The preflight's
+LOG.csv is a log of robot_driver (or robot_driver_mock); its columns are in apps/robot/robot_log.hpp (a log without
+the tauF columns, from before CTRL-1, still plots). The preflight's
 prediction LOG.csv.preflight.csv, which robot_driver writes next to every log, is overlaid automatically (dashed;
 --no-preflight leaves it out); --overlay adds more, e.g. the MuJoCo closed loop of the same experiment
 (out/mujoco_paper_hand.csv from experiments_mujoco). Writes FILE.png and FILE.pdf (default: next to LOG.csv) with
@@ -98,6 +99,10 @@ def summary(name, d):
         if np.any(cruise):
             print(f"  while cruising (nu_d = {np.max(d['ref']):.3f}): mean eta_dot {np.mean(d['eta_dot'][cruise]):.4f}"
                   f" ({100 * np.mean(d['eta_dot'][cruise]) / np.max(d['ref']):.0f} % of nu_d)")
+    if "tauF1" in d.dtype.names:
+        tau_f = np.abs(joints(d, "tauF")[f])
+        print(f"  friction feedforward |tau_f| up to {tau_f.max():.3f} N m "
+              f"(joint {np.unravel_index(tau_f.argmax(), tau_f.shape)[1] + 1})")
     span = stop_span(d)
     if span:
         stop = d["phase"] == 1
