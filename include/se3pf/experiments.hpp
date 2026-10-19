@@ -280,6 +280,7 @@ namespace se3pf {
         double xiNorm = 0.0;
         double beta = 0.0, betaDot = 0.0;
         double sigmaMin = 0.0;      // sigma_min(A)
+        double iEta = 0.0, iXi = 0.0, iBeta = 0.0;  // the integral terms in mu (|.| of the xi one; CTRL-1)
         double ramp = 0.0;          // the mu ramp factor r(t / T)
         int newton = 0;             // Newton updates of the projection
         Vec7 q = Vec7::Zero(), dq = Vec7::Zero();

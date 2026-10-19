@@ -99,6 +99,9 @@ def summary(name, d):
         if np.any(cruise):
             print(f"  while cruising (nu_d = {np.max(d['ref']):.3f}): mean eta_dot {np.mean(d['eta_dot'][cruise]):.4f}"
                   f" ({100 * np.mean(d['eta_dot'][cruise]) / np.max(d['ref']):.0f} % of nu_d)")
+    if "int_beta" in d.dtype.names:
+        print(f"  integral terms |int_eta| up to {np.max(np.abs(d['int_eta'][f])):.3f}, |int_xi| up to "
+              f"{np.max(d['int_xi'][f]):.3f}, |int_beta| up to {np.max(np.abs(d['int_beta'][f])):.3f}")
     if "tauF1" in d.dtype.names:
         tau_f = np.abs(joints(d, "tauF")[f])
         print(f"  friction feedforward |tau_f| up to {tau_f.max():.3f} N m "

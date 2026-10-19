@@ -143,6 +143,17 @@ namespace se3pf {
                 // (14.7 % of the margin at K_d = 8), so K_d grows by 1.5 and K_p by 2.25.
                 e.gains = Gains::fromLambda(6.0);
                 e.gains.kt = 15.0;  // loops_7: eta_dot lagged at 53 % of nu_d with k_t = 10, no slip transients
+                // Integral action (loops_5 to loops_8, 2026-10-19: beta drifts to its bound as the joints lag the
+                // lift under static friction, a lag a PD cannot remove; eta_dot settles at 50 to 73 % of nu_d). With
+                // K_i = K_p the slow mode sits near -2 rad/s with the fast pole at -8; the clamps keep the integral's
+                // share of qdd* inside the acceleration margin (the beta channel moves joint 1 by X_1 = 0.8 per unit
+                // mu, so 3.0 is 2.5 rad/s^2 there, 17 % of its limit).
+                e.gains.kiEta = 25.0;
+                e.gains.Ki = 36.0;
+                e.gains.KiBeta = 36.0;
+                e.gains.integralMaxEta = 1.0;
+                e.gains.integralMaxXi = 1.0;
+                e.gains.integralMaxBeta = 3.0;
                 // Joints 1 to 4: the Gaz et al. 2019 levels (run loops_3, 2026-10-19: joints 2, 3 and 4 followed the
                 // lift with them). The wrist, from loops_2 to loops_4 (2026-10-19): joint 5 broke away at 0.76 N m
                 // commanded and then ran at 0.35 rad/s under 0.80 N m, joint 6 broke away at 0.40 N m and crept,
@@ -164,9 +175,12 @@ namespace se3pf {
                 e.friction.velocityScale = 0.005;
                 // The wrist's feedback authority: reflected rotor inertia on joints 5 to 7. With 0.1 kg m^2 (loops_5)
                 // joint 6 broke away and followed, joints 5 and 7 did not: at the beta bound the feedback added
-                // only 0.16 and 0.26 N m to their feedforward (joint 7 held 0.76 N m without moving). With 0.3 the
-                // same errors command three times that, and the beyond-breakaway damping keeps the loop tame.
-                e.rotorInertia = (Vec7() << 0.0, 0.0, 0.0, 0.0, 0.3, 0.3, 0.3).finished();
+                // only 0.16 and 0.26 N m to their feedforward (joint 7 held 0.76 N m without moving). With 0.3
+                // (loops_7, loops_8) every joint moved, and the beyond-breakaway damping (1 to 2 N m s/rad) kept the
+                // loop tame. 0.5: the beta channel reaches joint 7 only through X_7 M_cmd,77 (X_7 about -0.34), so
+                // with the integral at its clamp joint 7 gets 0.5 * 0.34 * (36 beta + 3) = 0.8 N m at beta = 0.05,
+                // its breakaway, instead of 0.5 N m.
+                e.rotorInertia = (Vec7() << 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5).finished();
                 v.push_back(e);
             }
             {
@@ -468,6 +482,9 @@ namespace se3pf {
         r.beta = st.beta;
         r.betaDot = st.betaDot;
         r.sigmaMin = st.sigmaMin;
+        r.iEta = st.iEta;
+        r.iXi = st.iXi.norm();
+        r.iBeta = st.iBeta;
         r.ramp = st.ramp;
         r.newton = st.iterations;
         r.q = q;

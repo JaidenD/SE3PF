@@ -277,6 +277,19 @@ namespace {
                     e.friction.velocityScale);
     }
 
+    // The gains of the experiment (Gains), with the integral action if any
+    void printGains(const ExperimentSpec& e, const char* indent)
+    {
+        const Gains& g = e.gains;
+        std::printf("%sgains: K_p %.0f, K_d %.0f, k_t %.0f (k_p,eta %.0f, k_d,eta %.0f), K_p,beta %.0f, K_d,beta %.0f",
+                    indent, g.Kp, g.Kd, g.kt, g.kpEta, g.kdEta, g.KpBeta, g.KdBeta);
+        if (g.kiEta > 0.0 || g.Ki > 0.0 || g.KiBeta > 0.0)
+            std::printf("; integral action k_i,eta %.0f, K_i %.0f, K_i,beta %.0f, clamped at %.1f, %.1f, %.1f\n",
+                        g.kiEta, g.Ki, g.KiBeta, g.integralMaxEta, g.integralMaxXi, g.integralMaxBeta);
+        else
+            std::printf("; no integral action\n");
+    }
+
     // The rotor inertia added to M in the command (ExperimentSpec::rotorInertia)
     void printRotorInertia(const ExperimentSpec& e, const char* indent)
     {
@@ -809,6 +822,7 @@ namespace {
         for (const ExperimentSpec& e : experiments()) {
             std::printf("%d. %-12s %s (%.0f s + time to rest)\n   %s\n   Watch: %s\n", k++, e.name.c_str(),
                         e.title.c_str(), e.duration, e.purpose.c_str(), e.watch.c_str());
+            printGains(e, "   ");
             printFriction(e, "   ");
             printRotorInertia(e, "   ");
         }
@@ -873,6 +887,7 @@ namespace {
                     spec.purpose.c_str(), spec.watch.c_str());
         std::printf("  start q0 = %s rad (|xi0| = %.4f, beta0 = %.3f rad), %.1f s + time to rest\n",
                     vecString(setup.start()).c_str(), spec.xi0.norm(), spec.beta0, spec.duration);
+        printGains(spec, "  ");
         printFriction(spec, "  ");
         printRotorInertia(spec, "  ");
 

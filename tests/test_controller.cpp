@@ -1214,6 +1214,161 @@ TEST_CASE("Timing: Controller<PandaArm>::step with the lift's beta", "[.timing]"
     CHECK(us < 100.0);
 }
 
+namespace {
+    // The Panda closed loop at the joint-acceleration level with a constant disturbance d added to every commanded
+    // qdd* (a joint torque the model does not know, divided by the inertia: friction, a payload), from rest on the
+    // path at s0, with the reference given (hold at s0, or a constant nu_d). Returns the last status and the largest
+    // |xi| on the way; stops early if a step fails.
+    bool disturbedLoop(const PandaExample& ex, const Gains& gains, const TangentialReference& ref, const Vec7& d,
+                       double T, Controller<PandaArm>::Status& st, double* maxXi = nullptr)
+    {
+        Controller<PandaArm> c(ex.tube(), gains, ref, &ex.redundancy());
+        c.reset(PandaExample::s0);
+        Vec7 q = Vec7::Zero(), dq = Vec7::Zero();
+        ex.lift().eval(PandaExample::s0, q);
+        const double dt = 1e-3;
+        double mx = 0.0;
+        for (long k = 0; k * dt <= T; ++k) {
+            Vec7 qdd = Vec7::Zero();
+            if (!c.step(q, dq, k * dt, dt, qdd, st))
+                return false;
+            mx = std::max(mx, st.xi.norm());
+            qdd += d;
+            q += dt * dq + (0.5 * dt * dt) * qdd;
+            dq += dt * qdd;
+        }
+        if (maxXi)
+            *maxXi = mx;
+        return true;
+    }
+
+    TangentialReference holdAtS0()
+    {
+        return TangentialReference::fromPosition([](double, double& e, double& de, double& dde) {
+            e = PandaExample::s0;
+            de = 0.0;
+            dde = 0.0;
+        });
+    }
+
+    // A d in output coordinates at the configuration of the status: what the integral terms must carry
+    Vec7 outputDisturbance(const PandaExample& ex, const Gains& gains, const Vec7& q, double eta, const Vec7& d)
+    {
+        Controller<PandaArm>::OutputState out;
+        REQUIRE(Controller<PandaArm>(ex.tube(), gains, holdAtS0(), &ex.redundancy()).outputs(q, eta, out));
+        return out.A * d;
+    }
+}  // namespace
+
+TEST_CASE("Integral action: a constant disturbance leaves a steady error without it and none with it (CTRL-1)")
+{
+    const PandaExample& ex = pandaExample();
+    const Vec7 d = (Vec7() << 0.1, 0.0, 0.1, 0.0, 0.3, 0.0, 0.3).finished();  // rad/s^2
+    Gains pd = PandaExample::gains();
+    Gains pid = pd;
+    pid.kiEta = 25.0;
+    pid.Ki = 36.0;
+    pid.KiBeta = 36.0;
+    Controller<PandaArm>::Status st;
+
+    SECTION("holding a point of the path (A constant): the PID removes the error, its integrals carry A d")
+    {
+        REQUIRE(disturbedLoop(ex, pd, holdAtS0(), d, 12.0, st));
+        const double xiPd = st.xi.norm(), betaPd = std::abs(st.beta), ePd = std::abs(st.eTan);
+        CAPTURE(sci(xiPd), sci(betaPd), sci(ePd));
+        CHECK(xiPd > 1e-3);  // the paper's PD: a steady error, A d / K_p
+        CHECK(st.iXi.isZero());  // and no integral terms
+        CHECK(st.iBeta == 0.0);
+        CHECK(st.iEta == 0.0);
+        // The error is the disturbance over the gains (the hold's k_p = 9 on eta, K_p = 16 on xi and beta)
+        Vec7 q = Vec7::Zero();
+        ex.lift().eval(PandaExample::s0, q);
+        const Vec7 Ad = outputDisturbance(ex, pd, q, PandaExample::s0, d);
+        CHECK_THAT(st.eTan, WithinAbs(Ad[0] / 9.0, 0.1 * std::abs(Ad[0] / 9.0)));
+        CHECK_THAT(st.xi.norm(), WithinAbs(Ad.segment<5>(1).norm() / 16.0, 0.1 * Ad.segment<5>(1).norm() / 16.0));
+
+        // 20 s: with the hold's k_p = 9, k_d = 6 the eta channel's integral mode (s^3 + 6 s^2 + 9 s + 25) is lightly
+        // damped at -0.4 +- 2.2i, so it takes that long to settle to 1e-5
+        double maxXi = 0.0;
+        REQUIRE(disturbedLoop(ex, pid, holdAtS0(), d, 20.0, st, &maxXi));
+        CAPTURE(sci(st.xi.norm()), sci(st.beta), sci(st.eTan), maxXi);
+        CHECK(st.xi.norm() < 1e-5);
+        CHECK(std::abs(st.beta) < 1e-5);
+        CHECK(std::abs(st.eTan) < 1e-5);
+        CHECK(maxXi < 0.02);  // no large transient on the way
+        // The integral terms are the disturbance in output coordinates
+        const Vec7 AdEnd = outputDisturbance(ex, pid, q, PandaExample::s0, d);
+        CHECK_THAT(st.iEta, WithinAbs(AdEnd[0], 1e-4));
+        CHECK(maxDiff(st.iXi, Vec5(AdEnd.segment<5>(1))) < 1e-4);
+        CHECK_THAT(st.iBeta, WithinAbs(AdEnd[6], 1e-4));
+    }
+    SECTION("moving along the path (A d varies with eta): the PID keeps the errors well below the PD's")
+    {
+        REQUIRE(disturbedLoop(ex, pd, PandaExample::reference(), d, 12.0, st));
+        const double xiPd = st.xi.norm(), ePd = std::abs(st.eTan);
+        REQUIRE(disturbedLoop(ex, pid, PandaExample::reference(), d, 12.0, st));
+        CAPTURE(sci(xiPd), sci(ePd), sci(st.xi.norm()), sci(st.beta), sci(st.eTan));
+        CHECK(xiPd > 3e-3);
+        CHECK(st.xi.norm() < 0.2 * xiPd);
+        CHECK(std::abs(st.eTan) < 0.5 * ePd);
+        CHECK(std::abs(st.beta) < 2e-3);
+        CHECK(st.iXi.norm() > 1e-3);  // the integrals carry the (slowly varying) disturbance
+        CHECK(std::abs(st.iEta) > 1e-3);
+    }
+}
+
+TEST_CASE("Integral action: the clamps hold, the integrals reset, bad gains are refused (CTRL-1)")
+{
+    const PandaExample& ex = pandaExample();
+    Gains pid = PandaExample::gains();
+    pid.kiEta = 25.0;
+    pid.Ki = 36.0;
+    pid.KiBeta = 36.0;
+    pid.integralMaxEta = 0.05;  // far below what the disturbance needs: every integral runs into its clamp
+    pid.integralMaxXi = 0.05;
+    pid.integralMaxBeta = 0.005;
+    const Vec7 d = (Vec7() << 0.2, 0.0, 0.2, 0.0, 0.6, 0.0, 0.6).finished();
+    Controller<PandaArm>::Status st;
+    double maxXi = 0.0;
+    REQUIRE(disturbedLoop(ex, pid, holdAtS0(), d, 10.0, st, &maxXi));
+    CAPTURE(st.iEta, st.iXi.transpose(), st.iBeta, maxXi);
+    CHECK_THAT(std::abs(st.iEta), WithinAbs(pid.integralMaxEta, 1e-12));
+    CHECK_THAT(std::abs(st.iBeta), WithinAbs(pid.integralMaxBeta, 1e-12));
+    CHECK(st.iXi.cwiseAbs().maxCoeff() <= pid.integralMaxXi + 1e-12);
+    CHECK_THAT(st.iXi.cwiseAbs().maxCoeff(), WithinAbs(pid.integralMaxXi, 1e-12));
+    CHECK(maxXi < 0.04);  // the PD still holds the arm in the tube with the integrals saturated
+    CHECK(st.xi.norm() > 1e-4);  // ... with a steady error left, since the integrals are clamped
+    // Reset zeroes the integrals: the next step at rest on the lift carries at most one period of error
+    Controller<PandaArm> c(ex.tube(), pid, PandaExample::reference(), &ex.redundancy());
+    Vec7 q = Vec7::Zero(), qdd = Vec7::Zero();
+    ex.lift().eval(PandaExample::s0, q);
+    for (int k = 0; k < 3000; ++k)  // wind the integrals up: at rest, e_v = -nu_d every period
+        REQUIRE(c.step(q, Vec7::Zero(), 1e-3 * k, 1e-3, qdd, st));
+    CHECK_THAT(std::abs(st.iEta), WithinAbs(pid.integralMaxEta, 1e-12));
+    c.reset(PandaExample::s0);
+    REQUIRE(c.step(q, Vec7::Zero(), 3.0, 1e-3, qdd, st));
+    CHECK_THAT(st.iEta, WithinAbs(-pid.kiEta * PandaExample::nuD * 1e-3, 1e-12));  // one period of e_v = -nu_d
+    CHECK(st.iXi.norm() < 1e-9);
+    CHECK(std::abs(st.iBeta) < 1e-9);
+    // Refused: negative or non-finite gains, bounds that are not positive
+    Gains bad = pid;
+    bad.Ki = -1.0;
+    CHECK_THROWS_AS(Controller<PandaArm>(ex.tube(), bad, PandaExample::reference(), &ex.redundancy()),
+                    std::invalid_argument);
+    bad = pid;
+    bad.KiBeta = std::numeric_limits<double>::quiet_NaN();
+    CHECK_THROWS_AS(Controller<PandaArm>(ex.tube(), bad, PandaExample::reference(), &ex.redundancy()),
+                    std::invalid_argument);
+    bad = pid;
+    bad.integralMaxXi = 0.0;
+    CHECK_THROWS_AS(Controller<PandaArm>(ex.tube(), bad, PandaExample::reference(), &ex.redundancy()),
+                    std::invalid_argument);
+    bad = pid;
+    bad.integralMaxEta = std::numeric_limits<double>::infinity();
+    CHECK_THROWS_AS(Controller<PandaArm>(ex.tube(), bad, PandaExample::reference(), &ex.redundancy()),
+                    std::invalid_argument);
+}
+
 TEST_CASE("ExperimentLoop::follow, observe, the safety stop and the safety checks do not allocate")
 {
     // What the robot driver's 1 kHz callback calls (apps/robot/robot_driver.cpp; Rules for the 1 kHz loop): one
@@ -1248,6 +1403,7 @@ TEST_CASE("ExperimentLoop::follow, observe, the safety stop and the safety check
     // ... and the same cycle with the friction feedforward on (the lift's spline and tanh at every cycle: CTRL-1)
     ExperimentSpec withFriction = *spec;
     withFriction.friction = FrictionFeedforward::gaz2019();
+    withFriction.gains.Ki = withFriction.gains.KiBeta = withFriction.gains.kiEta = 36.0;  // the integral path too
     const ExperimentSetup setupF(ex, withFriction);
     ExperimentLoop loopF(setupF, monitor);
     ModelTerms terms;

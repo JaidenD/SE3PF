@@ -3,6 +3,7 @@
 #include "se3pf/redundancy.hpp"
 #include "se3pf/tube.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <stdexcept>
@@ -18,6 +19,18 @@ namespace se3pf {
         double kt = 5.0;                     // tangential velocity, eq:tan-vel
         double kpEta = 9.0, kdEta = 6.0;     // tangential position, eq:tan-pos
         double KpBeta = 16.0, KdBeta = 8.0;  // redundancy (n = 7 only), eq:beta-law
+
+        // Integral action (CTRL-1), off by default: the paper's loops have none. Each channel integrates its error
+        // over the control period (e_v or e_eta, every component of xi, beta) and adds -K_i I to its mu, with the
+        // integral clamped so that |K_i I| never exceeds integralMax of that channel (anti-windup: static friction
+        // can hold an error for seconds, and the clamp keeps the integral's share of qdd* inside the acceleration
+        // margin). Controller::reset zeroes the integrals; the mu ramp scales them with the rest of mu.
+        double kiEta = 0.0;            // tangential: on e_v (velocity reference) or e_eta (position reference)
+        double Ki = 0.0;               // transverse, each component of xi
+        double KiBeta = 0.0;           // redundancy (n = 7 only)
+        double integralMaxEta = 1.0;   // bound on |kiEta I_eta|, in the units of mu (output acceleration)
+        double integralMaxXi = 1.0;    // bound on |Ki I_xi,k|, each component
+        double integralMaxBeta = 1.0;  // bound on |KiBeta I_beta|
 
         // Transverse and redundancy poles at -lambda (critically damped): Kp = KpBeta = lambda^2, Kd = KdBeta =
         // 2 lambda. The tangential gains keep their defaults.
@@ -159,20 +172,30 @@ namespace se3pf {
                 double eTan = 0.0;         // e_v = eta_dot - nu_d, or e_eta = eta - eta_d wrapped into (-L/2, L/2]
                 Vec5 xi = Vec5::Zero(), xiDot = Vec5::Zero();
                 double beta = 0.0, betaDot = 0.0;  // n = 7 only
+                double iEta = 0.0;         // the integral terms added to mu: kiEta I_eta, ...
+                Vec5 iXi = Vec5::Zero();   // ... Ki I_xi, ...
+                double iBeta = 0.0;        // ... KiBeta I_beta (n = 7 only); zero when the integral action is off
                 double ramp = 1.0;         // the factor r(t / T) on mu (1 when the ramp is off)
                 double sigmaMin = 0.0;     // smallest singular value of A (Proposition 2: positive near the path)
                 int iterations = 0;        // Newton updates of the projection at q
                 bool ok = false;
             };
 
-            // Throws std::invalid_argument if the reference has no function for its mode, or if the redundancy
-            // output is null for n = 7 (an arm with a redundant joint needs beta) or set for n = 6 (no redundancy).
+            // Throws std::invalid_argument if the reference has no function for its mode, if the redundancy
+            // output is null for n = 7 (an arm with a redundant joint needs beta) or set for n = 6 (no redundancy),
+            // or if an integral gain is negative or non-finite or an integral bound is not positive and finite.
             Controller(const Tube& tube, const Gains& gains, TangentialReference reference,
                        const RedundancyOutput* redundancy = nullptr)
                 : tube_(tube), gains_(gains), reference_(std::move(reference)), redundancy_(redundancy)
             {
                 if (!reference_.valid())
                     throw std::invalid_argument("Controller: the tangential reference has no function for its mode");
+                for (double k : {gains.kiEta, gains.Ki, gains.KiBeta})
+                    if (!std::isfinite(k) || k < 0.0)
+                        throw std::invalid_argument("Controller: an integral gain must be finite and >= 0");
+                for (double b : {gains.integralMaxEta, gains.integralMaxXi, gains.integralMaxBeta})
+                    if (!std::isfinite(b) || !(b > 0.0))
+                        throw std::invalid_argument("Controller: an integral bound must be finite and > 0");
                 if (n == 7 && redundancy_ == nullptr)
                     throw std::invalid_argument("Controller: a redundant system (n = 7) needs a redundancy output");
                 if (n == 6 && redundancy_ != nullptr)
@@ -207,9 +230,16 @@ namespace se3pf {
                 rampTime_ = T;
             }
 
-            // Sets the prediction eta-hat = eta0 wrapped into [0, L). Call it before the first step of every run,
-            // with eta0 near the closest point (Tube::globalProject, or s0 for a start pose Psi(s0, xi)).
-            void reset(double eta0) { etaHat_ = tube_.wrap(eta0); }
+            // Sets the prediction eta-hat = eta0 wrapped into [0, L) and zeroes the integrals. Call it before the
+            // first step of every run, with eta0 near the closest point (Tube::globalProject, or s0 for a start
+            // pose Psi(s0, xi)).
+            void reset(double eta0)
+            {
+                etaHat_ = tube_.wrap(eta0);
+                iEta_ = 0.0;
+                iXi_.setZero();
+                iBeta_ = 0.0;
+            }
 
             // ybar and A at q (eq:A), with the projection started at guess. False if the pose has left the tube or
             // a value is not finite.
@@ -295,6 +325,28 @@ namespace se3pf {
                 if constexpr (n == 7)
                     mu[6] = -gains_.KpBeta * out.beta - gains_.KdBeta * yDot[6];  // eq:beta-law
 
+                // Integral action (CTRL-1): the clamped integrals of the errors over this period
+                if (gains_.kiEta > 0.0) {
+                    const double lim = gains_.integralMaxEta / gains_.kiEta;
+                    iEta_ = std::clamp(iEta_ + st.eTan * dt, -lim, lim);
+                    st.iEta = gains_.kiEta * iEta_;
+                    mu[0] -= st.iEta;
+                }
+                if (gains_.Ki > 0.0) {
+                    const double lim = gains_.integralMaxXi / gains_.Ki;
+                    iXi_ = (iXi_ + out.xi * dt).cwiseMax(-lim).cwiseMin(lim);
+                    st.iXi = gains_.Ki * iXi_;
+                    mu.template segment<5>(1) -= st.iXi;
+                }
+                if constexpr (n == 7) {
+                    if (gains_.KiBeta > 0.0) {
+                        const double lim = gains_.integralMaxBeta / gains_.KiBeta;
+                        iBeta_ = std::clamp(iBeta_ + out.beta * dt, -lim, lim);
+                        st.iBeta = gains_.KiBeta * iBeta_;
+                        mu[6] -= st.iBeta;
+                    }
+                }
+
                 // Optional ramp on mu only: at rest at t = 0, Adot qdot = 0 too, so the first command is zero.
                 const double r = rampTime_ > 0.0 ? quinticRamp(t / rampTime_) : 1.0;
                 mu *= r;
@@ -344,6 +396,9 @@ namespace se3pf {
             const RedundancyOutput* redundancy_;
             double etaHat_ = 0.0;     // prediction eta-hat (Algorithm 1)
             double rampTime_ = 0.0;   // T of the mu ramp; 0 = off
+            double iEta_ = 0.0;       // the integrals of e_v (or e_eta), xi and beta (CTRL-1), clamped
+            Vec5 iXi_ = Vec5::Zero();
+            double iBeta_ = 0.0;
     };
 
 }  // namespace se3pf

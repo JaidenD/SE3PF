@@ -551,8 +551,21 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         CHECK(on.contains("Finished at rest."));
         CHECK_FALSE(on.contains("SAFETY STOP"));
         CHECK(on.contains("callback allocations: 0"));
-        CHECK(on.contains("command inertia: M + diag(0.000, 0.000, 0.000, 0.000, 0.300, 0.300, 0.300) kg m^2"));
+        CHECK(on.contains("command inertia: M + diag(0.000, 0.000, 0.000, 0.000, 0.500, 0.500, 0.500) kg m^2"));
+        CHECK(on.contains("integral action k_i,eta 25, K_i 36, K_i,beta 36, clamped at 1.0, 1.0, 3.0"));
         const Csv log = readCsv(logPath("coulomb_on"));
+        // The integral terms are logged and bounded by their clamps
+        double maxIXi = 0.0, maxIBeta = 0.0, maxIEta = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            maxIEta = std::max(maxIEta, std::abs(log.at(k, "int_eta")));
+            maxIXi = std::max(maxIXi, log.at(k, "int_xi"));
+            maxIBeta = std::max(maxIBeta, std::abs(log.at(k, "int_beta")));
+        }
+        CAPTURE(maxIEta, maxIXi, maxIBeta);
+        CHECK(maxIEta <= loops.gains.integralMaxEta + 1e-9);
+        CHECK(maxIXi <= std::sqrt(5.0) * loops.gains.integralMaxXi + 1e-9);
+        CHECK(maxIBeta <= loops.gains.integralMaxBeta + 1e-9);
+        CHECK(maxIEta > 1e-4);  // the integrals work (the plant's friction leaves something to integrate)
         const Cruise d = cruiseOf(log);
         CAPTURE(d.etaDot, d.maxXi, d.maxBeta);
         CHECK(d.etaDot > 0.95 * nuD);  // 99 %

@@ -8,9 +8,9 @@
 //   beta, beta_dot, sigma_min, ramp, newton, q1..q7, dq1..dq7, tau1..tau7 (commanded torque, without G),
 //   tauG1..tauG7 (tau + G: the torque the joints deliver), qdd1..qdd7 (qdd*), tauF1..tauF7 (the friction
 //   feedforward tau_f, part of tau; CTRL-1), tauJ1..tauJ7 (driver only: the measured link-side torque tau_J of the
-//   robot state, gravity included, to compare with tauG), compute_us, period_ms, success_rate (the last three are
-//   the driver's: time spent in the callback, libfranka's period, and the robot's control_command_success_rate; 0 in
-//   predictions, as tauJ).
+//   robot state, gravity included, to compare with tauG), int_eta, int_xi, int_beta (the integral terms in mu, |.|
+//   of the xi one; CTRL-1), compute_us, period_ms, success_rate (the last three are the driver's: time spent in the
+//   callback, libfranka's period, and the robot's control_command_success_rate; 0 in predictions, as tauJ).
 #include "se3pf/experiments.hpp"
 
 #include <cstddef>
@@ -27,7 +27,7 @@ namespace se3pf::robot {
         for (const char* name : {"q", "dq", "tau", "tauG", "qdd", "tauF", "tauJ"})
             for (int i = 1; i <= 7; ++i)
                 os << ',' << name << i;
-        os << ",compute_us,period_ms,success_rate\n";
+        os << ",int_eta,int_xi,int_beta,compute_us,period_ms,success_rate\n";
     }
 
     inline void writeLogRow(std::ostream& os, const ExperimentLogRow& r)
@@ -40,7 +40,8 @@ namespace se3pf::robot {
         for (const Vec7* v : {&r.q, &r.dq, &r.tau, &r.tauG, &r.qdd, &r.tauF, &r.tauJ})
             for (int i = 0; i < 7; ++i)
                 os << ',' << (*v)[i];
-        os << ',' << r.computeUs << ',' << r.periodMs << ',' << r.successRate << '\n';
+        os << ',' << r.iEta << ',' << r.iXi << ',' << r.iBeta << ',' << r.computeUs << ',' << r.periodMs << ','
+           << r.successRate << '\n';
     }
 
     // Writes rows [0, count) to path; false if the file cannot be written.

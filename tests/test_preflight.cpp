@@ -122,6 +122,19 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK(e.gains.Kd == 2.0 * lambda);
         CHECK(e.gains.KpBeta == lambda * lambda);
         CHECK(e.gains.KdBeta == 2.0 * lambda);
+        // Integral action only in loops (CTRL-1)
+        if (e.name == "loops") {
+            CHECK(e.gains.kiEta == 25.0);
+            CHECK(e.gains.Ki == 36.0);
+            CHECK(e.gains.KiBeta == 36.0);
+            CHECK(e.gains.integralMaxEta == 1.0);
+            CHECK(e.gains.integralMaxXi == 1.0);
+            CHECK(e.gains.integralMaxBeta == 3.0);
+        } else {
+            CHECK(e.gains.kiEta == 0.0);
+            CHECK(e.gains.Ki == 0.0);
+            CHECK(e.gains.KiBeta == 0.0);
+        }
         if (e.mode == TangentialReference::Mode::Velocity) {
             CHECK(e.gains.kt == (e.name == "loops" ? 15.0 : 5.0));
             CHECK(e.speed.end() <= e.duration);
@@ -176,7 +189,7 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CAPTURE(e.name);
         CHECK(e.rotorInertia.isZero() == (e.name != "loops"));
     }
-    CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.3, 0.3, 0.3).finished()) == 0.0);
+    CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.5, 0.5, 0.5).finished()) == 0.0);
 }
 
 TEST_CASE("SpeedProfile: values, an exact time derivative, continuity at the joints, zero outside")
@@ -995,6 +1008,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
         ExperimentSpec e = spec("loops");
         e.speed = {0.05, 2.0, 1.0, 0.0};  // stops abruptly at 3 s ...
         e.gains.kt = 0.01;                // ... and the tangential law takes 100 s to brake
+        e.gains.kiEta = 0.0;              // (without the integral action, which would brake it)
         e.duration = 3.0;
         const ExperimentSetup s(ex, e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
