@@ -256,8 +256,8 @@ TEST_CASE("robot_driver_mock: every experiment end to end: approach, torque loop
 {
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        // The simulated robot has the Coulomb friction the experiment's feedforward compensates (loops: half of
-        // Gaz et al. 2019; the others: none)
+        // The simulated robot has the Coulomb friction the experiment's feedforward compensates (loops: Gaz et
+        // al. 2019 with joint 6 raised; the others: none)
         const bool friction = e.friction.active();
         const Run r = run("0.0.0.0 " + e.name + " --yes " + logArg(e.name), coulombEnv(e.friction.coulomb));
         INFO(r.out);
@@ -477,16 +477,17 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
 {
     const ExperimentSpec& loops = *findExperiment("loops");
     REQUIRE(loops.friction.active());
-    const Vec7 fc = loops.friction.coulomb;  // half of Gaz et al. 2019
+    const Vec7 fc = loops.friction.coulomb;  // Gaz et al. 2019, joint 6 raised
     const double nuD = loops.speed.nuMax;
 
-    // 1. Today's stall: the plant with the full Coulomb levels of Gaz et al. 2019 (twice what the spec
-    // compensates) and no feedforward (--friction-scale=0, mock only: the spec as it ran on the robot). As on the
+    // 1. The stall of loops_1: the plant with the Coulomb levels of Gaz et al. 2019 and no feedforward
+    // (--friction-scale=0, mock only: the spec as it ran on the robot). As on the
     // robot (logs/loops_1.csv: eta_dot 1 % of nu_d while cruising, |xi| 0.018, beta 0.030, the wrist never moving
     // under a commanded torque below its friction), the arm stays put: no reflex, no stop, "finished at rest" with
     // the errors frozen.
     {
-        const Run r = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("stall"), coulombEnv(2.0 * fc));
+        const Vec7 plant = FrictionFeedforward::gaz2019().coulomb;
+        const Run r = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("stall"), coulombEnv(plant));
         INFO(r.out);
         CHECK(r.code == 0);
         CHECK(r.contains("friction feedforward: off"));
@@ -512,8 +513,8 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
             maxDdq = std::max(maxDdq, log.vec(k, "qdd").cwiseAbs().cwiseQuotient(PandaArm::ddqMax()).maxCoeff());
         }
         CAPTURE(maxTau5, maxTau7, maxDdq);
-        CHECK(maxTau5 < 2.0 * fc[4]);
-        CHECK(maxTau7 < 2.0 * fc[6]);
+        CHECK(maxTau5 < plant[4]);
+        CHECK(maxTau7 < plant[6]);
         CHECK(maxDdq > 0.10);
     }
     // 2. The plant with exactly the friction the spec compensates, without and with the feedforward
@@ -534,7 +535,7 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         CHECK(on.contains("Finished at rest."));
         CHECK_FALSE(on.contains("SAFETY STOP"));
         CHECK(on.contains("callback allocations: 0"));
-        CHECK(on.contains("tau_f <= 0.32 N m (joint 4)"));
+        CHECK(on.contains("tau_f <= 0.64 N m (joint 4)"));
         const Csv log = readCsv(logPath("coulomb_on"));
         const Cruise d = cruiseOf(log);
         CAPTURE(d.etaDot, d.maxXi, d.maxBeta);

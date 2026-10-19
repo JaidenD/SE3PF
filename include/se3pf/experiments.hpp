@@ -47,7 +47,7 @@ namespace se3pf {
     // turns around. It is part of the commanded torque: the torque and torque-rate checks, the preflight and the
     // logs (tauF) all see it; the safety stop does not use it. A tau_f below a joint's true static friction can never
     // move that joint by itself (static friction absorbs it); one above it pushes the joint, which the feedback must
-    // then hold back within the acceleration margin, so the values start conservative (half of Gaz et al. 2019,
+    // then hold back within the acceleration margin, so the values started conservative (half of Gaz et al. 2019,
     // which the robot's joints 1, 2 and 4 exceeded) and are raised from the logs. Fc, Fv >= 0 and v0 > 0 (checked
     // by ExperimentSetup).
     struct FrictionFeedforward {

@@ -125,14 +125,19 @@ namespace se3pf {
                           "cruising. Friction: on 2026-10-19 the arm stalled here without compensation (eta_dot 1 % "
                           "of nu_d; |xi| 0.018 and beta 0.030 held by static friction: inside the acceleration "
                           "margin the wrist joints can deliver only 0.02 to 0.06 N m), so the friction feedforward "
-                          "tau_f (half the Coulomb levels of Gaz et al. 2019) is on. If the arm still stalls, raise "
-                          "it towards the full levels. An Acceleration stop on a wrist joint soon after the motion "
+                          "tau_f (the Coulomb levels of Gaz et al. 2019, joint 6 raised to 0.25 N m; half of them "
+                          "was not enough) is on. If the arm still stalls, raise the joints that did not move. "
+                          "An Acceleration stop on a wrist joint soon after the motion "
                           "starts means tau_f exceeds that joint's friction: lower it. If |beta| exceeds 3e-2 here, "
                           "expect 'paper' to stop at its 0.05 rad margin.";
                 e.speed = {0.05, 4.0, 26.8, 4.0};
                 e.duration = 38.0;
                 e.limits.flangeSpeed = 0.2;
-                e.friction = FrictionFeedforward::gaz2019().scaled(0.5);
+                // Full Gaz et al. 2019 levels, joint 6 raised: at half of them (run loops_2, 2026-10-19) the wrist
+                // never moved, and the torques held without motion were 0.235 (joint 5), 0.148 (6) and 0.141 N m (7),
+                // joint 6 at Gaz's full level 0.152 already.
+                e.friction = FrictionFeedforward::gaz2019();
+                e.friction.coulomb[5] = 0.25;
                 v.push_back(e);
             }
             {
