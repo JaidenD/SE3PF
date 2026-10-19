@@ -581,7 +581,7 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         double predMax = 0.0;
         for (std::size_t k = 0; k < pred.rows.size(); ++k)
             predMax = std::max(predMax, pred.vec(k, "tauF").cwiseAbs().maxCoeff());
-        CHECK(predMax >= fc.maxCoeff());
+        CHECK(predMax >= fc.maxCoeff() - 1e-6);
         CHECK(predMax <= tauFBound(loops).maxCoeff());
     }
 }

@@ -142,7 +142,7 @@ namespace se3pf {
                 // most 13 % of the acceleration margin; the slip transients after a breakaway scale with K_d
                 // (14.7 % of the margin at K_d = 8), so K_d grows by 1.5 and K_p by 2.25.
                 e.gains = Gains::fromLambda(6.0);
-                e.gains.kt = 10.0;
+                e.gains.kt = 15.0;  // loops_7: eta_dot lagged at 53 % of nu_d with k_t = 10, no slip transients
                 // Joints 1 to 4: the Gaz et al. 2019 levels (run loops_3, 2026-10-19: joints 2, 3 and 4 followed the
                 // lift with them). The wrist, from loops_2 to loops_4 (2026-10-19): joint 5 broke away at 0.76 N m
                 // commanded and then ran at 0.35 rad/s under 0.80 N m, joint 6 broke away at 0.40 N m and crept,
@@ -150,7 +150,9 @@ namespace se3pf {
                 // Each wrist level stays below its joint's breakaway, so tau_f alone never moves a joint; the
                 // feedback, with the rotor inertia below, supplies the rest.
                 e.friction = FrictionFeedforward::gaz2019();
-                e.friction.coulomb[0] = 0.40;  // loops_5: stuck under 0.37 N m commanded (its lift motion is slow)
+                // Joint 1 (the base joint, no gravity load): stuck under 0.58 N m at the end of loops_7 and under
+                // 0.80 N m through the stall of loops_6; its 4.4 N m of feedback authority holds any excess
+                e.friction.coulomb[0] = 0.70;
                 e.friction.coulomb[4] = 0.60;
                 e.friction.coulomb[5] = 0.35;
                 e.friction.coulomb[6] = 0.50;

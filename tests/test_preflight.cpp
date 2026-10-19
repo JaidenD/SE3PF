@@ -123,7 +123,7 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK(e.gains.KpBeta == lambda * lambda);
         CHECK(e.gains.KdBeta == 2.0 * lambda);
         if (e.mode == TangentialReference::Mode::Velocity) {
-            CHECK(e.gains.kt == (e.name == "loops" ? 10.0 : 5.0));
+            CHECK(e.gains.kt == (e.name == "loops" ? 15.0 : 5.0));
             CHECK(e.speed.end() <= e.duration);
             CHECK(e.speed.rampUp >= 2.0);  // smooth start
             CHECK(e.speed.rampDown >= 4.0);  // ends at rest
@@ -163,13 +163,13 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK(e.friction.velocityScale == (e.name == "loops" ? 0.005 : 0.01));
     }
     Vec7 expected = FrictionFeedforward::gaz2019().coulomb;
-    expected[0] = 0.40;  // joint 1: stuck under 0.37 N m (loops_5)
+    expected[0] = 0.70;  // joint 1: stuck under 0.58 N m (loops_7) and 0.80 N m (loops_6)
     expected[4] = 0.60;  // the wrist: below each joint's breakaway measured on 2026-10-19 (loops_2 to loops_5)
     expected[5] = 0.35;
     expected[6] = 0.50;
     CHECK(maxDiff(spec("loops").friction.coulomb, expected) == 0.0);
     CHECK(maxDiff(spec("loops").friction.viscous, (Vec7() << 0, 0, 0, 0, 0.5, 0.5, 0.5).finished()) == 0.0);
-    CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.65);  // joint 4: 0.64 N m, the largest
+    CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.75);  // joint 1: 0.70 N m, the largest
     CHECK(spec("loops").friction.velocityScale == 0.005);
     // The rotor inertia: 0.3 kg m^2 on the wrist of loops, none elsewhere
     for (const ExperimentSpec& e : all) {
@@ -348,7 +348,7 @@ TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift a
     ModelTerms m;
     m.M = 2.0 * Mat<7, 7>::Identity();
     m.c = Vec7::Constant(0.1);
-    m.G = Vec7::Constant(3.0);
+    m.G = Vec7::Constant(1.0);  // small: the artificial state below (at rest, 0.05 behind nu_d) commands a few N m
 
     // referenceSpeed: the profile's nu_d for a velocity reference, 0 for a position reference
     double nu = 0.0, dnu = 0.0;
@@ -510,7 +510,7 @@ TEST_CASE("preflight with the friction feedforward: loops passes with a model, t
     checkWithinLimits(r);
     // The peak: at least the largest Fc (joint 4, 0.64 N m), at most Fc + Fv |v| with the lift's speeds below
     // 0.25 rad/s at nu_d (joint 5: 0.60 + 0.5 |v|); the summary names it
-    CHECK(r.peaks.maxTauF >= f.coulomb.maxCoeff());
+    CHECK(r.peaks.maxTauF >= f.coulomb.maxCoeff() - 1e-6);  // tanh saturates
     CHECK(r.peaks.maxTauF <= (f.coulomb + 0.25 * f.viscous).maxCoeff());
     char peak[64];
     std::snprintf(peak, sizeof(peak), "tau_f <= %.2f N m (joint %d)", r.peaks.maxTauF, r.peaks.maxTauFJoint + 1);
