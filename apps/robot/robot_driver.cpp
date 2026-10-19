@@ -3,8 +3,9 @@
 // The only code of the project that includes libfranka. The same source builds two programs:
 //   robot_driver       against the real libfranka 0.9.2 (cmake -DSE3PF_WITH_LIBFRANKA=ON -DFranka_DIR=...);
 //   robot_driver_mock  against mock/franka (always built with the tests; software in the loop), with the test-only
-//                      options --yes (answers every prompt), --inject (forces a violation) and --friction-scale
-//                      (scales the experiment's friction feedforward), compiled only into the mock build
+//                      options --yes (answers every prompt), --inject (forces a violation) and
+//                      --compensation-scale (scales the experiment's friction feedforward and rotor inertia; 0 is
+//                      the controller as it ran before CTRL-1), compiled only into the mock build
 //                      (SE3PF_MOCK_FRANKA).
 //
 // Usage:
@@ -168,7 +169,8 @@ namespace {
         bool yes = false;          // mock build only: answer every prompt
         Violation inject = Violation::None;  // mock build only: force this violation from injectTime on ...
         double injectTime = 0.0;             // ... s after the torque loop started
-        double frictionScale = 1.0;          // mock build only: the spec's friction feedforward times this (0: off)
+        double compensationScale = 1.0;      // mock build only: the spec's friction feedforward and rotor inertia
+                                             // times this (0: the controller as before CTRL-1)
     };
 
     void usage(const char* prog)
@@ -183,7 +185,8 @@ namespace {
                   << "  (mock build) --yes answers every prompt; --inject=<violation>@<t> forces that violation t s "
                      "into the torque loop (violations: projection, joint-limit, joint-velocity, acceleration, "
                      "torque, torque-rate, flange-speed, tube, redundancy, conditioning, non-finite, timeout); "
-                     "--friction-scale=<k> multiplies the experiment's friction feedforward by k >= 0\n"
+                     "--compensation-scale=<k> multiplies the experiment's friction feedforward and rotor inertia by "
+                     "k >= 0 (0: as before CTRL-1)\n"
 #endif
                   << "exit codes: 0 ok, 1 usage, 2 unknown experiment, 3 kinematics check, 4 preflight, 5 safety "
                      "stop, 6 aborted, 7 not ready / not at the start, 8 libfranka error, 9 log file\n";
@@ -1053,12 +1056,12 @@ namespace {
                 if (opt.inject == Violation::None || end == v.c_str() + at + 1 || *end != '\0'
                     || !(opt.injectTime >= 0.0))
                     return false;
-            } else if (a.rfind("--friction-scale=", 0) == 0) {
-                const std::string v = a.substr(17);
+            } else if (a.rfind("--compensation-scale=", 0) == 0) {
+                const std::string v = a.substr(21);
                 char* end = nullptr;
-                opt.frictionScale = std::strtod(v.c_str(), &end);
-                if (v.empty() || end != v.c_str() + v.size() || !std::isfinite(opt.frictionScale)
-                    || !(opt.frictionScale >= 0.0))
+                opt.compensationScale = std::strtod(v.c_str(), &end);
+                if (v.empty() || end != v.c_str() + v.size() || !std::isfinite(opt.compensationScale)
+                    || !(opt.compensationScale >= 0.0))
                     return false;
             }
 #endif
@@ -1118,9 +1121,10 @@ int main(int argc, char** argv)
         if (opt.command == "error-recovery")
             return cmdRecover(robot, opt);
 #ifdef SE3PF_MOCK_FRANKA
-        // Test only: the experiment with its friction feedforward scaled (0: without it, as before CTRL-1)
+        // Test only: the experiment with its CTRL-1 compensation scaled (0: as before CTRL-1)
         ExperimentSpec scaled = *spec;
-        scaled.friction = spec->friction.scaled(opt.frictionScale);
+        scaled.friction = spec->friction.scaled(opt.compensationScale);
+        scaled.rotorInertia = opt.compensationScale * spec->rotorInertia;
         return cmdRun(robot, example, scaled, opt);
 #else
         return cmdRun(robot, example, *spec, opt);

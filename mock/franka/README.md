@@ -41,7 +41,7 @@ Faults and other settings for tests, from environment variables (read when the `
 | Variable | Meaning |
 | --- | --- |
 | `FRANKA_MOCK_PUSH=j,tau,t0,T` | an external torque `tau` (N m) on joint `j` (1-7) from `t0` for `T` seconds after the torque loop starts |
-| `FRANKA_MOCK_FRICTION=d` | viscous joint friction `d` (N m s/rad) in the plant, not in the model |
+| `FRANKA_MOCK_FRICTION=d` or `d1,...,d7` | viscous joint friction (N m s/rad) in the plant, not in the model, every joint or per joint |
 | `FRANKA_MOCK_ROTOR=j` or `j1,...,j7` | inertia (kg m^2) added to the diagonal of the plant's M, every joint or per joint, not to the model's (the reflected rotor inertia that franka::Model lacks; CTRL-1) |
 | `FRANKA_MOCK_COULOMB=c` or `c1,...,c7` | Coulomb friction (N m) in the plant, every joint or per joint: `-c sign(qd)`, regularized below 1e-4 rad/s and integrated implicitly, so a joint under a net torque below `c` stays put (the stall of 2026-10-19, CTRL-1) |
 | `FRANKA_MOCK_PLANT_LOAD=m` | an extra mass `m` (kg) at the flange in the plant only (an end effector missing in Desk) |

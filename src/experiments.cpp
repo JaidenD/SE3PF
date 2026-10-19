@@ -143,14 +143,21 @@ namespace se3pf {
                 // Each wrist level stays below its joint's breakaway, so tau_f alone never moves a joint; the
                 // feedback, with the rotor inertia below, supplies the rest.
                 e.friction = FrictionFeedforward::gaz2019();
+                e.friction.coulomb[0] = 0.40;  // loops_5: stuck under 0.37 N m commanded (its lift motion is slow)
                 e.friction.coulomb[4] = 0.60;
                 e.friction.coulomb[5] = 0.35;
                 e.friction.coulomb[6] = 0.50;
-                // The wrist's feedback authority: 0.1 kg m^2 of reflected rotor inertia on joints 5 to 7 (a
-                // conservative value: the joints accelerated at under 1 rad/s^2 under 0.2 to 0.6 N m of net torque in
-                // loops_4, which franka::Model's 0.003 to 0.013 kg m^2 cannot explain); 0.5 to 0.6 N m at the
-                // acceleration margin instead of 0.02 to 0.06.
-                e.rotorInertia = (Vec7() << 0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.1).finished();
+                // Beyond breakaway the wrist is strongly damped (loops_4 and loops_5: joint 5 settled at 0.35 rad/s
+                // under 0.8 N m, joint 6's speed followed its command with about 2 N m s/rad): a viscous part, well
+                // below the measured values
+                e.friction.viscous = (Vec7() << 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5).finished();
+                // Joints whose lift motion is slow (joint 1: 0.009 rad/s at most) need the full Fc at those speeds
+                e.friction.velocityScale = 0.005;
+                // The wrist's feedback authority: reflected rotor inertia on joints 5 to 7. With 0.1 kg m^2 (loops_5)
+                // joint 6 broke away and followed, joints 5 and 7 did not: at the beta bound the feedback added
+                // only 0.16 and 0.26 N m to their feedforward (joint 7 held 0.76 N m without moving). With 0.3 the
+                // same errors command three times that, and the beyond-breakaway damping keeps the loop tame.
+                e.rotorInertia = (Vec7() << 0.0, 0.0, 0.0, 0.0, 0.3, 0.3, 0.3).finished();
                 v.push_back(e);
             }
             {

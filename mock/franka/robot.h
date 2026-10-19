@@ -114,7 +114,7 @@ namespace franka {
 
                         for (int sub = 0; sub < 2; ++sub) {  // semi-implicit Euler, 0.5 ms
                             const double h = 0.5 * dt;
-                            const mock::Vec7 rhs = motor + ext - config_.friction * dq_
+                            const mock::Vec7 rhs = motor + ext - config_.friction.cwiseProduct(dq_)
                                                    - plant.coriolis(q_, dq_, plantLoad_) - plant.gravity(q_, plantLoad_, g);
                             // Coulomb friction -Fc sign(qd) (FRANKA_MOCK_COULOMB), regularized to -Fc qd / max(|qd|,
                             // vEps) and taken implicitly in qd, since its slope at rest, Fc / vEps, is stiff:

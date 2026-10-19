@@ -11,6 +11,7 @@
 #include "test_helpers.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -158,21 +159,23 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
     for (const ExperimentSpec& e : all) {
         CAPTURE(e.name);
         CHECK(e.friction.active() == (e.name == "loops"));
-        CHECK(e.friction.velocityScale == 0.01);
+        CHECK(e.friction.velocityScale == (e.name == "loops" ? 0.005 : 0.01));
     }
     Vec7 expected = FrictionFeedforward::gaz2019().coulomb;
-    expected[4] = 0.60;  // the wrist: below each joint's breakaway measured on 2026-10-19 (loops_2 to loops_4)
+    expected[0] = 0.40;  // joint 1: stuck under 0.37 N m (loops_5)
+    expected[4] = 0.60;  // the wrist: below each joint's breakaway measured on 2026-10-19 (loops_2 to loops_5)
     expected[5] = 0.35;
     expected[6] = 0.50;
     CHECK(maxDiff(spec("loops").friction.coulomb, expected) == 0.0);
-    CHECK(spec("loops").friction.viscous.isZero());
+    CHECK(maxDiff(spec("loops").friction.viscous, (Vec7() << 0, 0, 0, 0, 0.5, 0.5, 0.5).finished()) == 0.0);
     CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.65);  // joint 4: 0.64 N m, the largest
-    // The rotor inertia: 0.1 kg m^2 on the wrist of loops, none elsewhere
+    CHECK(spec("loops").friction.velocityScale == 0.005);
+    // The rotor inertia: 0.3 kg m^2 on the wrist of loops, none elsewhere
     for (const ExperimentSpec& e : all) {
         CAPTURE(e.name);
         CHECK(e.rotorInertia.isZero() == (e.name != "loops"));
     }
-    CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.1, 0.1, 0.1).finished()) == 0.0);
+    CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.3, 0.3, 0.3).finished()) == 0.0);
 }
 
 TEST_CASE("SpeedProfile: values, an exact time derivative, continuity at the joints, zero outside")
@@ -389,7 +392,7 @@ TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift a
         for (int i = 0; i < 7; ++i) {
             CAPTURE(i);
             CHECK(c.tauF[i] * dqs[i] >= 0.0);
-            CHECK(std::abs(c.tauF[i]) <= f.coulomb[i] + 1e-15);
+            CHECK(std::abs(c.tauF[i]) <= f.coulomb[i] + f.viscous[i] * std::abs(v[i]) + 1e-15);
         }
         CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + s.spec().rotorInertia.cwiseProduct(c.qdd) + m.c + c.tauF)) < 1e-12);
         CHECK(maxDiff(c.tauG, Vec7(c.tau + m.G)) < 1e-12);
@@ -464,7 +467,7 @@ TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift a
         ExperimentLoop::Cycle c;
         loop.follow(10.0, qs, Vec7::Zero(), &light, c);
         CHECK(c.violation == Violation::Torque);
-        CHECK_THAT(std::abs(c.tauF[5]), WithinAbs(8.0, 1e-9));
+        CHECK_THAT(std::abs(c.tauF[5]), WithinAbs(8.0 + e.friction.viscous[5] * std::abs(v[5]), 1e-9));
         CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + e.rotorInertia.cwiseProduct(c.qdd) + c.tauF)) < 1e-12);
         CHECK(std::abs(c.tau[5]) > 0.6 * 12.0);  // beyond the 60 % margin of joint 6
     }
@@ -504,10 +507,13 @@ TEST_CASE("preflight with the friction feedforward: loops passes with a model, t
     INFO(r.summary());
     CHECK(r.ok);
     checkWithinLimits(r);
-    // The peak: the largest Fc (joint 4, 0.64 N m), reached while cruising; the summary names it
-    CHECK_THAT(r.peaks.maxTauF, WithinAbs(f.coulomb[3], 2e-3));
-    CHECK(r.peaks.maxTauFJoint == 3);
-    CHECK(r.summary().find("tau_f <= 0.64 N m (joint 4)") != std::string::npos);
+    // The peak: at least the largest Fc (joint 4, 0.64 N m), at most Fc + Fv |v| with the lift's speeds below
+    // 0.25 rad/s at nu_d (joint 5: 0.60 + 0.5 |v|); the summary names it
+    CHECK(r.peaks.maxTauF >= f.coulomb.maxCoeff());
+    CHECK(r.peaks.maxTauF <= (f.coulomb + 0.25 * f.viscous).maxCoeff());
+    char peak[64];
+    std::snprintf(peak, sizeof(peak), "tau_f <= %.2f N m (joint %d)", r.peaks.maxTauF, r.peaks.maxTauFJoint + 1);
+    CHECK(r.summary().find(peak) != std::string::npos);
     // Smooth: the torque rate stays far below the 600 N m/s margin (the sign changes go through tanh)
     CAPTURE(r.peaks.maxTauRate);
     CHECK(r.peaks.maxTauRate < 20.0);

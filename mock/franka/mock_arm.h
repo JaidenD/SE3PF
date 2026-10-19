@@ -150,7 +150,7 @@ namespace franka::mock {
     struct Config {
         int pushJoint = -1;         // zero-based; -1: no push
         double pushTorque = 0.0, pushStart = 0.0, pushDuration = 0.0;
-        double friction = 0.0;      // viscous, N m s/rad, every joint, plant only
+        Vec7 friction = Vec7::Zero();  // viscous, N m s/rad, per joint, plant only (FRANKA_MOCK_FRICTION: 1 or 7 values)
         Vec7 coulomb = Vec7::Zero();  // Coulomb friction, N m, per joint, plant only (FRANKA_MOCK_COULOMB)
         Vec7 rotor = Vec7::Zero();    // inertia added to the plant's M diagonal, kg m^2, plant only (FRANKA_MOCK_ROTOR)
         double plantLoad = 0.0;     // extra mass at the flange, plant only, kg
@@ -195,8 +195,12 @@ namespace franka::mock {
                 if (c.pushJoint < 0 || c.pushJoint > 6)
                     throw std::invalid_argument("mock: FRANKA_MOCK_PUSH joint must be 1 to 7");
             }
-            if (auto p = numbers("FRANKA_MOCK_FRICTION", 1); p.first)
-                c.friction = p.second[0];
+            if (auto p = numbers("FRANKA_MOCK_FRICTION", 7, 1); p.first) {
+                const bool perJoint = std::string(std::getenv("FRANKA_MOCK_FRICTION")).find(',') != std::string::npos;
+                c.friction = perJoint ? fromArray(p.second) : Vec7::Constant(p.second[0]);
+                if ((c.friction.array() < 0.0).any())
+                    throw std::invalid_argument("mock: FRANKA_MOCK_FRICTION needs values >= 0");
+            }
             if (auto p = numbers("FRANKA_MOCK_ROTOR", 7, 1); p.first) {
                 const bool perJoint = std::string(std::getenv("FRANKA_MOCK_ROTOR")).find(',') != std::string::npos;
                 c.rotor = perJoint ? fromArray(p.second) : Vec7::Constant(p.second[0]);
