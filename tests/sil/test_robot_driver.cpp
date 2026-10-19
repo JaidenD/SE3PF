@@ -674,8 +674,9 @@ TEST_CASE("robot_driver_mock: the driver refuses to move: kinematics, robot mode
     }
     SECTION("the approach ends off the start (exit 7): no torque control")
     {
-        // 0.02 rad on every joint (the joint check), and 3e-3 rad (inside the joint tolerance; xi and beta are off)
-        for (const char* e : {"0.02", "0.003"}) {
+        // 0.02 rad on every joint (the joint check), and 6e-3 rad (inside the joint tolerance; xi and beta are off
+        // the 4e-3 start tolerance)
+        for (const char* e : {"0.02", "0.006"}) {
             CAPTURE(e);
             const Run r = run("0.0.0.0 self-motion --yes " + logArg("off"), std::string("FRANKA_MOCK_APPROACH_ERROR=") + e);
             INFO(r.out);

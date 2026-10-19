@@ -1128,12 +1128,11 @@ int main(int argc, char** argv)
         // rest-posture norm weighted on joint 7, which moves the flange's yaw from joint 7 to joint 1 (CTRL-1,
         // 2026-10-19: with the paper's lift joint 1 stick-slipped at 3 to 5 mrad/s). The paper's simulations and
         // apps keep the unweighted lift.
-#ifdef SE3PF_MOCK_FRANKA
-        // Test only: before CTRL-1 the lift was the paper's
-        const PandaExample example(0.1, opt.beforeCtrl1 ? Vec7(Vec7::Ones()) : PandaExample::hardwareLiftWeights());
-#else
-        const PandaExample example(0.1, PandaExample::hardwareLiftWeights());
-#endif
+        // The lift the robot runs on: the paper's (all ones) at the operator's request on 2026-10-19, to be compared
+        // with the weighted lift PandaExample::hardwareLiftWeights() (weight 10 on joint 7, which keeps joint 1 out of
+        // its stick-slip regime); swap the argument to use the weighted one.
+        const PandaExample example(0.1, Vec7::Ones());
+        (void)PandaExample::hardwareLiftWeights;
         std::printf("Lift: nearest the rest posture in the norm weighted diag%s (the paper's lift: all ones)\n",
                     vecString(example.liftWeights(), 0).c_str());
         franka::Robot robot(opt.ip, opt.noRt ? franka::RealtimeConfig::kIgnore : franka::RealtimeConfig::kEnforce);
