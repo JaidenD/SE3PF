@@ -53,27 +53,30 @@ namespace se3pf {
         }
 
         // One node of the lift: projected Newton steps from q until the stopping rule holds (Offline: the lift q*).
-        // Returns the number of updates, or -1 on failure (q is then unspecified).
-        int projectedNewton(const Pose& target, const Vec7& qr, Vec7& q)
+        // wInv is the diagonal of W^-1 (all ones for the paper's lift). Returns the number of updates, or -1 on
+        // failure (q is then unspecified).
+        int projectedNewton(const Pose& target, const Vec7& qr, const Vec7& wInv, Vec7& q)
         {
             for (int k = 0; k <= kMaxLiftUpdates; ++k) {
                 Mat67 J = Mat67::Zero();
                 const Pose g = PandaArm::output(q, &J);
                 const Vec6 e = poseError(g, target);
 
-                // J^+ y = J^T (J J^T)^-1 y; J J^T is symmetric positive definite while J has full rank.
-                const LLT<Mat6> JJt(J * J.transpose());
+                // J^+ y = W^-1 J^T (J W^-1 J^T)^-1 y; J W^-1 J^T is symmetric positive definite while J has full
+                // rank (J J^T for the paper's lift).
+                const Mat<7, 6> WinvJt = wInv.asDiagonal() * J.transpose();  // W^-1 J^T
+                const LLT<Mat6> JJt(J * WinvJt);
                 if (JJt.info() != Success)
                     return -1;
                 const Vec7 d = qr - q;
-                const Vec7 nullStep = d - J.transpose() * JJt.solve(Vec6(J * d));  // (I - J^+ J)(q_r - q)
+                const Vec7 nullStep = d - WinvJt * JJt.solve(Vec6(J * d));  // (I - J^+ J)(q_r - q)
 
-                // nullStep = 0 is the Lagrange condition: q - q_r is in the range of J^T.
+                // nullStep = 0 is the Lagrange condition: W (q - q_r) is in the range of J^T.
                 if (e.norm() < kTol && nullStep.norm() < kTol)
                     return k;
                 if (k == kMaxLiftUpdates)
                     break;
-                const Vec7 dq = J.transpose() * JJt.solve(e) + nullStep;
+                const Vec7 dq = WinvJt * JJt.solve(e) + nullStep;
                 if (!dq.allFinite())
                     return -1;
                 q += dq;
@@ -81,17 +84,18 @@ namespace se3pf {
             return -1;
         }
 
-        // f(q+) - 2 f(q*) + f(q-) for f(q) = |q - q_r|^2, with q+- the configurations with pose FK(q*) on the
+        // f(q+) - 2 f(q*) + f(q-) for f(q) = |q - q_r|_W^2, with q+- the configurations with pose FK(q*) on the
         // self-motion through q*, at x^T q = x^T q* +- delta (minimumCheck). NaN if q+ or q- is not found.
-        double secondDifference(const Vec7& qs, const Vec7& qr, double delta)
+        double secondDifference(const Vec7& qs, const Vec7& qr, const Vec7& w, double delta)
         {
+            auto f = [&](const Vec7& q) { return (q - qr).cwiseProduct(w).dot(q - qr); };
             Mat67 J = Mat67::Zero();
             const Pose target = PandaArm::output(qs, &J);  // = gamma(s_k) to 1e-12: the same self-motion
             const Vec7 x = kernelVector(J);
             Vec7 qp = qs, qm = qs;
             if (!constrainedIK(target, x, x.dot(qs) + delta, qp) || !constrainedIK(target, x, x.dot(qs) - delta, qm))
                 return std::numeric_limits<double>::quiet_NaN();
-            return (qp - qr).squaredNorm() - 2.0 * (qs - qr).squaredNorm() + (qm - qr).squaredNorm();
+            return f(qp) - 2.0 * f(qs) + f(qm);
         }
     }  // namespace
 
@@ -149,11 +153,14 @@ namespace se3pf {
     // ---------------------------------------------------------------------------------------------------------
     // Offline: the lift q* (Assumption 1)
 
-    Lift::Lift(const Path& path, const Vec7& restPosture, int gridIntervals)
-        : L_(path.length()), n_(gridIntervals), qr_(restPosture)
+    Lift::Lift(const Path& path, const Vec7& restPosture, int gridIntervals, const Vec7& weights)
+        : L_(path.length()), n_(gridIntervals), qr_(restPosture), w_(weights)
     {
         if (n_ < 4)
             throw std::invalid_argument("Lift: need at least 4 grid intervals (fourth-order differences)");
+        if (!w_.allFinite() || !(w_.array() > 0.0).all())
+            throw std::invalid_argument("Lift: the weights must be finite and positive");
+        const Vec7 wInv = w_.cwiseInverse();
         const double h = L_ / n_;
 
         // Continuation: node 0 from q_r (a large first step, about 0.97 rad on the paper's path), every later node
@@ -163,7 +170,7 @@ namespace se3pf {
         Vec7 q = qr_;
         for (int k = 0; k <= n_; ++k) {
             const double s = k * h;
-            updates[k] = projectedNewton(path.pose(s), qr_, q);
+            updates[k] = projectedNewton(path.pose(s), qr_, wInv, q);
             if (updates[k] < 0)
                 throw std::runtime_error("Lift: Newton's method failed at s = " + std::to_string(s) +
                                          " (is the path reachable?)");
@@ -231,7 +238,7 @@ namespace se3pf {
         double smallest = std::numeric_limits<double>::infinity();
         double at = 0.0;
         for (int k = 0; k < n; ++k) {
-            const double d2 = secondDifference(Q[k], lift.restPosture(), delta);
+            const double d2 = secondDifference(Q[k], lift.restPosture(), lift.weights(), delta);
             if (std::isnan(d2)) {  // no later node can make the check pass
                 smallest = d2;
                 at = k * h;

@@ -587,7 +587,7 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         }
         CAPTURE(maxTauF.transpose(), maxRate);
         CHECK((maxTauF.array() > 0.9 * fc.array()).all());
-        CHECK(maxRate < 20.0);  // 3 N m/s
+        CHECK(maxRate < 60.0);  // 23 N m/s on the hardware lift (3 on the paper's); the robot's noise gives 100 to 170
         // The prediction carries the same feedforward
         const Csv pred = readCsv(fs::path(logPath("coulomb_on").string() + ".preflight.csv"));
         REQUIRE(pred.rows.size() > 30000);

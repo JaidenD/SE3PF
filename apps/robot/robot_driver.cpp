@@ -4,8 +4,9 @@
 //   robot_driver       against the real libfranka 0.9.2 (cmake -DSE3PF_WITH_LIBFRANKA=ON -DFranka_DIR=...);
 //   robot_driver_mock  against mock/franka (always built with the tests; software in the loop), with the test-only
 //                      options --yes (answers every prompt), --inject (forces a violation) and --before-ctrl1
-//                      (the experiment with the controller as it ran before CTRL-1: the paper's gains, no friction
-//                      feedforward, franka::Model's M alone), compiled only into the mock build (SE3PF_MOCK_FRANKA).
+//                      (the experiment with the controller as it ran before CTRL-1: the paper's lift and gains, no
+//                      friction feedforward, franka::Model's M alone), compiled only into the mock build
+//                      (SE3PF_MOCK_FRANKA).
 //
 // Usage:
 //   robot_driver list                                          the experiments, in the order to run them
@@ -150,10 +151,12 @@ namespace {
     constexpr double kKinematicsTolerance = 1e-5;  // PandaArm against franka::Model, pose and J_b entries
     constexpr double kMaxApproachDistance = 1.0;   // rad, any joint: farther, guide the arm closer in Desk first
     constexpr double kStartTolerance = 0.01;       // rad, any joint, after the approach
-    // |xi - xi0| and |beta - beta0| after the approach (5 % of the 0.04 tube bound, 4 % of the 0.05 beta bound; the
-    // mock's approach ends 1e-5 off, the robot's should be about 1e-4). A sanity check: the margins themselves are
-    // checked by a second preflight from the measured start.
-    constexpr double kStartOutputTolerance = 2e-3;
+    // |xi - xi0| and |beta - beta0| after the approach (10 % of the 0.04 tube bound, 8 % of the 0.05 beta bound; the
+    // mock's approach ends 1e-5 off, the robot's ended 5e-4 rad off per joint on 2026-10-19, and on the hardware lift
+    // beta is three times as sensitive to a joint error as on the paper's: 1 mrad on every joint gives 3.3e-3). A
+    // sanity check that the arm is where the preflight assumed: the margins themselves are checked by a second
+    // preflight from the measured start.
+    constexpr double kStartOutputTolerance = 4e-3;
     constexpr double kRestSpeed = 0.02;            // rad/s: the arm must be at rest before a motion
 
     struct Options {
@@ -184,8 +187,8 @@ namespace {
                   << "  (mock build) --yes answers every prompt; --inject=<violation>@<t> forces that violation t s "
                      "into the torque loop (violations: projection, joint-limit, joint-velocity, acceleration, "
                      "torque, torque-rate, flange-speed, tube, redundancy, conditioning, non-finite, timeout); "
-                     "--before-ctrl1 runs the experiment with the controller as before CTRL-1 (the paper's gains, no "
-                     "friction feedforward, franka::Model's M alone)\n"
+                     "--before-ctrl1 runs the experiment with the controller as before CTRL-1 (the paper's lift and "
+                     "gains, no friction feedforward, franka::Model's M alone)\n"
 #endif
                   << "exit codes: 0 ok, 1 usage, 2 unknown experiment, 3 kinematics check, 4 preflight, 5 safety "
                      "stop, 6 aborted, 7 not ready / not at the start, 8 libfranka error, 9 log file\n";
@@ -1121,7 +1124,18 @@ int main(int argc, char** argv)
     std::fflush(stdout);  // stdout before anything goes to stderr
 
     try {
-        const PandaExample example;  // the paper's Panda example: path, tube, lift, kernel frame (offline, < 1 s)
+        // The paper's Panda example (path, tube, lift, kernel frame; offline, < 1 s) with the hardware lift: the
+        // rest-posture norm weighted on joint 7, which moves the flange's yaw from joint 7 to joint 1 (CTRL-1,
+        // 2026-10-19: with the paper's lift joint 1 stick-slipped at 3 to 5 mrad/s). The paper's simulations and
+        // apps keep the unweighted lift.
+#ifdef SE3PF_MOCK_FRANKA
+        // Test only: before CTRL-1 the lift was the paper's
+        const PandaExample example(0.1, opt.beforeCtrl1 ? Vec7(Vec7::Ones()) : PandaExample::hardwareLiftWeights());
+#else
+        const PandaExample example(0.1, PandaExample::hardwareLiftWeights());
+#endif
+        std::printf("Lift: nearest the rest posture in the norm weighted diag%s (the paper's lift: all ones)\n",
+                    vecString(example.liftWeights(), 0).c_str());
         franka::Robot robot(opt.ip, opt.noRt ? franka::RealtimeConfig::kIgnore : franka::RealtimeConfig::kEnforce);
         if (opt.command == "check")
             return cmdCheck(robot, example);

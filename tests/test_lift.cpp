@@ -325,6 +325,87 @@ TEST_CASE("Lift: q* is a minimum of |q - q_r|^2 on each self-motion and not a ma
     CHECK(whereFar == 0.0);
 }
 
+TEST_CASE("Lift: a weighted rest-posture norm (the hardware lift) moves the yaw from joint 7 to joint 1")
+{
+    const PandaExample& ex = testing::pandaExample();
+    // All ones: the paper's lift, node for node (the same arithmetic)
+    const Lift same(ex.path(), PandaArm::restPosture(), 2000, Vec7::Ones());
+    double worst = 0.0;
+    for (int k = 0; k <= 2000; ++k)
+        worst = std::max(worst, maxDiff(same.nodes()[k], ex.lift().nodes()[k]));
+    CHECK(worst < 1e-12);
+    CHECK(maxDiff(same.weights(), Vec7::Ones()) == 0.0);
+
+    const Vec7 w = PandaExample::hardwareLiftWeights();
+    CHECK(w[6] == 10.0);
+    CHECK(maxDiff(w.head<6>(), Vec<6>::Ones()) == 0.0);
+    const Lift lw(ex.path(), PandaArm::restPosture(), 2000, w);
+    const LiftDiagnostics& d = lw.diagnostics();
+    CHECK(d.closureGap < 1e-9);
+    CHECK_THAT(d.minJointMargin, WithinAbs(0.358, 2e-3));
+    CHECK(d.minSigma > 0.15);
+    // FK(q*(s)) = gamma(s) at and between the nodes
+    for (double s : {0.0, 0.1, 0.3333, 0.5, 0.7})
+        for (double ds : {0.0, 0.5 * lw.length() / 2000}) {
+            Vec7 q = Vec7::Zero();
+            lw.eval(s + ds, q);
+            CHECK(maxDiff(PandaArm::output(q, nullptr), ex.path().pose(s + ds)) < 1e-9);
+        }
+    // The Lagrange condition in the weighted norm: W (q* - q_r) has no component along ker J_b, i.e.
+    // x^T W (q* - q_r) = 0, while the paper's lift has x^T (q* - q_r) = 0 (and not the weighted one)
+    double maxW = 0.0, maxPlain = 0.0;
+    for (int k = 0; k < 2000; k += 50) {
+        Mat67 J = Mat67::Zero();
+        PandaArm::output(lw.nodes()[k], &J);
+        const Vec7 x = kernelVector(J);
+        maxW = std::max(maxW, std::abs(x.dot(w.cwiseProduct(lw.nodes()[k] - PandaArm::restPosture()))));
+        maxPlain = std::max(maxPlain, std::abs(x.dot(lw.nodes()[k] - PandaArm::restPosture())));
+    }
+    CAPTURE(sci(maxW), sci(maxPlain));
+    CHECK(maxW < 1e-9);
+    CHECK(maxPlain > 1e-2);
+    // A minimum in the weighted norm
+    double where = 0.0;
+    CHECK(minimumCheck(lw, 0.05, &where) > 1e-3);
+    // Joint 1 does the yaw now: more travel and speed than with the paper's lift, joint 7 less; no joint faster
+    // than 15 % of its limit at nu_d = 0.05
+    auto travel = [](const Lift& l, int j, double& peak) {
+        double sum = 0.0;
+        peak = 0.0;
+        for (int k = 0; k < 2000; ++k) {
+            Vec7 q = Vec7::Zero(), dq = Vec7::Zero();
+            l.eval(k * l.length() / 2000, q, &dq);
+            sum += std::abs(dq[j]) * l.length() / 2000;
+            peak = std::max(peak, std::abs(dq[j]) * 0.05);
+        }
+        return sum;
+    };
+    double peak1w = 0.0, peak1 = 0.0, peak7w = 0.0, peak7 = 0.0;
+    const double travel1w = travel(lw, 0, peak1w), travel1 = travel(ex.lift(), 0, peak1);
+    const double travel7w = travel(lw, 6, peak7w), travel7 = travel(ex.lift(), 6, peak7);
+    CAPTURE(travel1w, travel1, travel7w, travel7, peak1w, peak1);
+    CHECK(travel1w > 3.0 * travel1);
+    CHECK(travel7w < travel7);
+    CHECK(peak1w > 0.15);
+    CHECK(peak1w < 0.15 * 2.175);
+    for (int j = 0; j < 7; ++j) {
+        double peak = 0.0;
+        travel(lw, j, peak);
+        CHECK(peak < 0.15 * (j < 4 ? 2.175 : 2.61));
+    }
+    // Weights must be finite and positive
+    Vec7 bad = w;
+    bad[2] = 0.0;
+    CHECK_THROWS_AS(Lift(ex.path(), PandaArm::restPosture(), 2000, bad), std::invalid_argument);
+    bad[2] = std::nan("");
+    CHECK_THROWS_AS(Lift(ex.path(), PandaArm::restPosture(), 2000, bad), std::invalid_argument);
+    // The example built on it reports its weights and has start configurations
+    const PandaExample hw(0.1, w);
+    CHECK(maxDiff(hw.liftWeights(), w) == 0.0);
+    CHECK(maxDiff(hw.paperStart(), ex.paperStart()) > 0.05);
+    CHECK(maxDiff(hw.lift().nodes()[0], lw.nodes()[0]) < 1e-12);
+}
+
 TEST_CASE("Lift: q*' at the nodes agrees with the implicit-function derivative")
 {
     // The node derivatives are fourth-order central differences: they agree with the exact q*' to about 1.4e-9

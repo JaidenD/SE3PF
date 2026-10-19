@@ -30,7 +30,16 @@ namespace se3pf {
             enum class RunKind { Paper, SelfMotion };
 
             // l = sqrt(w_R / w_p), the metres one radian counts for: W = diag(l^2 I, I). The paper uses l = 0.1 m.
-            explicit PandaExample(double l = 0.1);
+            // liftWeights: the diagonal of the rest-posture norm of the lift (Lift); ones for the paper's lift,
+            // hardwareLiftWeights() for the robot.
+            explicit PandaExample(double l = 0.1, const Vec7& liftWeights = Vec7::Ones());
+
+            // The lift weights the robot driver uses (CTRL-1, 2026-10-19): the paper's lift gives the flange's yaw
+            // to joint 7 and leaves joint 1 almost still (0.28 rad of travel per loop at up to 0.047 rad/s, slow
+            // for 42 % of the loop), where its 0.8 to 0.9 N m of static friction made it stick-slip. A weight on
+            // joint 7 keeps it near its rest value and hands the yaw to joint 1 (10 on joint 7: see the source).
+            static Vec7 hardwareLiftWeights();
+            const Vec7& liftWeights() const { return lift_.weights(); }
             PandaExample(const PandaExample&) = delete;
             PandaExample& operator=(const PandaExample&) = delete;
 

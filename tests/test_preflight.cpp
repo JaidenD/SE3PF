@@ -894,6 +894,34 @@ TEST_CASE("preflight: every experiment passes, kinematic only; the peaks of the 
     CHECK(maxDiff(loopsLog.back().q, loops.start()) < 2e-3);
 }
 
+TEST_CASE("preflight: every experiment passes on the hardware lift (the robot driver's example)", SLOW_IN_DEBUG)
+{
+    // The driver builds the example with PandaExample::hardwareLiftWeights(); the preflight of every experiment
+    // must pass on it too, kinematic only and with the test model, with the same margins as on the paper's lift
+    const PandaExample hw(0.1, PandaExample::hardwareLiftWeights());
+    const FakeDynamics dyn;
+    for (const ExperimentSpec& e : experiments()) {
+        CAPTURE(e.name);
+        const ExperimentSetup s(hw, e);
+        for (const DynamicsModel* model : {static_cast<const DynamicsModel*>(nullptr), static_cast<const DynamicsModel*>(&dyn)}) {
+            const PreflightReport r = preflight(s, model, s.monitor());
+            INFO(r.summary());
+            CHECK(r.ok);
+            checkWithinLimits(r);
+            CHECK(r.peaks.minJointMargin > 0.3);
+        }
+    }
+    // loops on the hardware lift: joint 1 moves (the point of the lift), still far inside its limits
+    std::vector<ExperimentLogRow> log;
+    const ExperimentSetup loops(hw, spec("loops"));
+    REQUIRE(preflight(loops, nullptr, loops.monitor(), &log).ok);
+    double maxDq1 = 0.0;
+    for (const ExperimentLogRow& row : log)
+        maxDq1 = std::max(maxDq1, std::abs(row.dq[0]));
+    CHECK(maxDq1 > 0.15);
+    CHECK(maxDq1 < 0.15 * PandaArm::dqMax()[0]);
+}
+
 TEST_CASE("preflight: every experiment passes with a dynamics model; the torques are M qdd* + C qd and G",
           SLOW_IN_DEBUG)
 {
