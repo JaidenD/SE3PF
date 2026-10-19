@@ -557,11 +557,21 @@ namespace {
             std::printf("Not ready: the arm is moving (|dq| = %.3f rad/s).\n", speed);
             return false;
         }
-        const double distance = (start - vec7(s.q)).cwiseAbs().maxCoeff();
+        const Vec7 q = vec7(s.q);
+        const double distance = (start - q).cwiseAbs().maxCoeff();
         if (!(distance <= kMaxApproachDistance)) {
-            std::printf("Not ready: joint distance to the start %.2f rad > %.1f rad. Guide the arm by hand close to "
-                        "the start (near the rest posture %s) and run again.\n",
-                        distance, kMaxApproachDistance, vecString(PandaArm::restPosture(), 2).c_str());
+            std::printf("Not ready: joint distance to the start %.2f rad > %.1f rad (the approach moves at most %.1f "
+                        "rad per joint). Guide the arm by hand (Desk guiding mode) so that every joint is within "
+                        "%.1f rad of the start, then run again:\n",
+                        distance, kMaxApproachDistance, kMaxApproachDistance, kMaxApproachDistance);
+            for (int i = 0; i < 7; ++i) {
+                const double d = start[i] - q[i];
+                std::printf("  joint %d: now %+.3f rad, start %+.3f rad, %s%+.2f rad%s\n", i + 1, q[i], start[i],
+                            std::abs(d) <= kMaxApproachDistance ? "ok (" : "MOVE IT BY ", d,
+                            std::abs(d) <= kMaxApproachDistance ? ")" : "");
+            }
+            std::printf("  (the rest posture %s is close to every experiment's start)\n",
+                        vecString(PandaArm::restPosture(), 2).c_str());
             return false;
         }
         return true;
