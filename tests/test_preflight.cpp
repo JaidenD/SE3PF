@@ -971,7 +971,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     SECTION("a start beta outside the redundancy margin: Redundancy at t = 0")
     {
         ExperimentSpec e = spec("self-motion");
-        e.beta0 = 0.06;
+        e.beta0 = 0.12;
         const ExperimentSetup s(ex, e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);

@@ -43,7 +43,7 @@ DDQ_MAX = np.array([15.0, 7.5, 10.0, 12.5, 15.0, 20.0, 20.0])
 TAU_MAX = np.array([87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0])
 JOINT_MARGIN, DQ_FRAC, DDQ_FRAC, TAU_FRAC = 0.10, 0.5, 0.3, 0.6
 TAU_RATE_MAX = 600.0
-XI_MAX, BETA_MAX = 0.04, 0.05
+XI_MAX, BETA_MAX = 0.04, 0.1
 
 
 def load(path):

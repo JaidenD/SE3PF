@@ -99,7 +99,7 @@ TEST_CASE("SafetyMonitor: the default limits are HardwareBounds")
     CHECK(B::tauRateFrac == 0.6);
     CHECK(B::flangeSpeed == 0.5);
     CHECK(B::xi == 0.04);
-    CHECK(B::beta == 0.05);
+    CHECK(B::beta == 0.1);
     CHECK(B::sigmaMin == 1e-3);
 }
 
