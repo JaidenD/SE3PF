@@ -122,13 +122,20 @@ namespace {
     std::string logArg(const std::string& name) { return "--log=" + (workDir() / (name + ".csv")).string(); }
     fs::path logPath(const std::string& name) { return workDir() / (name + ".csv"); }
 
-    // FRANKA_MOCK_COULOMB=c1,...,c7: the plant's Coulomb friction, e.g. what an experiment's feedforward compensates
-    std::string coulombEnv(const Vec7& c)
+    std::string csv7(const Vec7& v)
     {
-        std::string env = "FRANKA_MOCK_COULOMB=";
+        std::string s;
         for (int i = 0; i < 7; ++i)
-            env += (i ? "," : "") + std::to_string(c[i]);
-        return env;
+            s += (i ? "," : "") + std::to_string(v[i]);
+        return s;
+    }
+    // FRANKA_MOCK_COULOMB=c1,...,c7: the plant's Coulomb friction, e.g. what an experiment's feedforward compensates
+    std::string coulombEnv(const Vec7& c) { return "FRANKA_MOCK_COULOMB=" + csv7(c); }
+    // The plant of an experiment: the Coulomb friction its feedforward compensates and the rotor inertia its
+    // command assumes (what the robot has and franka::Model does not)
+    std::string plantEnv(const ExperimentSpec& e)
+    {
+        return coulombEnv(e.friction.coulomb) + " FRANKA_MOCK_ROTOR=" + csv7(e.rotorInertia);
     }
 
     // Mean eta_dot over the cruise of a velocity reference (rows with ref at its maximum), and the mean |dq_i|
@@ -259,7 +266,7 @@ TEST_CASE("robot_driver_mock: every experiment end to end: approach, torque loop
         // The simulated robot has the Coulomb friction the experiment's feedforward compensates (loops: Gaz et
         // al. 2019 with joint 6 raised; the others: none)
         const bool friction = e.friction.active();
-        const Run r = run("0.0.0.0 " + e.name + " --yes " + logArg(e.name), coulombEnv(e.friction.coulomb));
+        const Run r = run("0.0.0.0 " + e.name + " --yes " + logArg(e.name), plantEnv(e));
         INFO(r.out);
         REQUIRE(r.code == 0);
         CHECK(r.contains("Approach done"));
@@ -488,13 +495,15 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
     const double nuD = loops.speed.nuMax;
 
     // 1. The stall of loops_1: the plant with the Coulomb levels of Gaz et al. 2019 and no feedforward
-    // (--friction-scale=0, mock only: the spec as it ran on the robot). As on the
-    // robot (logs/loops_1.csv: eta_dot 1 % of nu_d while cruising, |xi| 0.018, beta 0.030, the wrist never moving
-    // under a commanded torque below its friction), the arm stays put: no reflex, no stop, "finished at rest" with
-    // the errors frozen.
+    // (--friction-scale=0, mock only). As on the robot (logs/loops_1.csv: eta_dot 1 % of nu_d while cruising, |xi|
+    // 0.018, beta 0.030, joints 1 and 5 never moving under a commanded torque below their friction), the arm
+    // (nearly) stays put: no reflex, no stop, "finished at rest" with the errors frozen. (The spec's rotor inertia
+    // is still in the command and the plant, so the mock's wrist feedback is stronger than the robot's was in
+    // loops_1: joint 7 creeps here.)
     {
         const Vec7 plant = FrictionFeedforward::gaz2019().coulomb;
-        const Run r = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("stall"), coulombEnv(plant));
+        const Run r = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("stall"),
+                          coulombEnv(plant) + " FRANKA_MOCK_ROTOR=" + csv7(loops.rotorInertia));
         INFO(r.out);
         CHECK(r.code == 0);
         CHECK(r.contains("friction feedforward: off"));
@@ -505,13 +514,14 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         const Cruise c = cruiseOf(log);
         CAPTURE(c.etaDot, c.maxXi, c.maxBeta, c.meanAbsDq.transpose());
         CHECK(c.etaDot < 0.15 * nuD);      // 7 % here, 1 % on the robot
-        CHECK(c.maxBeta > 0.03);           // 0.049 here, 0.030 on the robot
+        CHECK(c.maxBeta > 0.02);           // 0.030 here, 0.030 on the robot
         CHECK(c.maxBeta <= HardwareBounds::beta);
-        CHECK(c.maxXi > 0.01);             // 0.019 here, 0.018 on the robot
-        for (int i : {0, 4, 6})            // joints 1, 5 and 7 never move
+        CHECK(c.maxXi > 0.01);             // 0.015 here, 0.018 on the robot
+        for (int i : {0, 4})               // joints 1 and 5 never move, joint 7 creeps
             CHECK(c.meanAbsDq[i] < 1e-3);
-        // The commanded torque on the stuck wrist joints stays below their Coulomb level while qdd* asks for more
-        // than 10 % of their acceleration limit: the controller cannot break them free
+        CHECK(c.meanAbsDq[6] < 5e-3);
+        // The commanded torque on the stuck joint 5 stays below its Coulomb level while qdd* asks for more than
+        // 10 % of an acceleration limit: the controller cannot break it free
         double maxTau5 = 0.0, maxTau7 = 0.0, maxDdq = 0.0;
         for (std::size_t k = 0; k < log.rows.size(); ++k) {
             const Vec7 tau = log.vec(k, "tau").cwiseAbs();
@@ -521,12 +531,12 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         }
         CAPTURE(maxTau5, maxTau7, maxDdq);
         CHECK(maxTau5 < plant[4]);
-        CHECK(maxTau7 < plant[6]);
+        CHECK(maxTau7 < 1.5 * plant[6]);
         CHECK(maxDdq > 0.10);
     }
     // 2. The plant with exactly the friction the spec compensates, without and with the feedforward
     {
-        const Run off = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("coulomb_off"), coulombEnv(fc));
+        const Run off = run("0.0.0.0 loops --yes --friction-scale=0 " + logArg("coulomb_off"), plantEnv(loops));
         INFO(off.out);
         CHECK(off.code == 0);
         CHECK_FALSE(off.contains("REFLEX"));
@@ -536,13 +546,14 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         CHECK(c.maxBeta > 0.02);       // ... and |beta| 0.040 reaches what the robot showed (0.030)
         CHECK(c.maxXi > 5e-3);
 
-        const Run on = run("0.0.0.0 loops --yes " + logArg("coulomb_on"), coulombEnv(fc));
+        const Run on = run("0.0.0.0 loops --yes " + logArg("coulomb_on"), plantEnv(loops));
         INFO(on.out);
         CHECK(on.code == 0);
         CHECK(on.contains("Finished at rest."));
         CHECK_FALSE(on.contains("SAFETY STOP"));
         CHECK(on.contains("callback allocations: 0"));
-        CHECK(on.contains("tau_f <= 0.84 N m (joint 5)"));
+        CHECK(on.contains("tau_f <= 0.64 N m (joint 4)"));
+        CHECK(on.contains("command inertia: M + diag(0.000, 0.000, 0.000, 0.000, 0.100, 0.100, 0.100) kg m^2"));
         const Csv log = readCsv(logPath("coulomb_on"));
         const Cruise d = cruiseOf(log);
         CAPTURE(d.etaDot, d.maxXi, d.maxBeta);

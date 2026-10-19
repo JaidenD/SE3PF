@@ -125,9 +125,11 @@ namespace se3pf {
                           "cruising. Friction: on 2026-10-19 the arm stalled here without compensation (eta_dot 1 % "
                           "of nu_d; |xi| 0.018 and beta 0.030 held by static friction: inside the acceleration "
                           "margin the wrist joints can deliver only 0.02 to 0.06 N m), so the friction feedforward "
-                          "tau_f (the Coulomb levels of Gaz et al. 2019 on joints 1 to 4, twice them on the wrist; at "
-                          "the Gaz levels joints 2 to 4 followed the lift and the wrist did not move) is on. If the "
-                          "arm still stalls, raise the joints that did not move. "
+                          "tau_f (the Coulomb levels of Gaz et al. 2019 on joints 1 to 4, below the measured breakaway on "
+                          "the wrist) is on, and the wrist's command uses 0.1 kg m^2 of rotor inertia so that the "
+                          "feedback can hold it (loops_4: the wrist's friction is 0.4 to 0.8 N m, franka::Model's "
+                          "wrist inertia gives the feedback 0.02 to 0.06 N m). If the arm still stalls, raise the "
+                          "levels of the joints that did not move. "
                           "An Acceleration stop on a wrist joint soon after the motion "
                           "starts means tau_f exceeds that joint's friction: lower it. If |beta| exceeds 3e-2 here, "
                           "expect 'paper' to stop at its 0.05 rad margin.";
@@ -135,13 +137,20 @@ namespace se3pf {
                 e.duration = 38.0;
                 e.limits.flangeSpeed = 0.2;
                 // Joints 1 to 4: the Gaz et al. 2019 levels (run loops_3, 2026-10-19: joints 2, 3 and 4 followed the
-                // lift with them). The wrist: twice those levels. At half of them (loops_2) and at them (loops_3,
-                // joint 6 at 0.25) the wrist never moved; the torques it held without motion were 0.43 (joint 5),
-                // 0.27 (6) and 0.28 N m (7).
+                // lift with them). The wrist, from loops_2 to loops_4 (2026-10-19): joint 5 broke away at 0.76 N m
+                // commanded and then ran at 0.35 rad/s under 0.80 N m, joint 6 broke away at 0.40 N m and crept,
+                // joint 7 never moved under 0.58 N m; the joint torque sensors saw 25 to 75 % of those commands.
+                // Each wrist level stays below its joint's breakaway, so tau_f alone never moves a joint; the
+                // feedback, with the rotor inertia below, supplies the rest.
                 e.friction = FrictionFeedforward::gaz2019();
-                e.friction.coulomb[4] *= 2.0;
-                e.friction.coulomb[5] = 0.50;
-                e.friction.coulomb[6] *= 2.0;
+                e.friction.coulomb[4] = 0.60;
+                e.friction.coulomb[5] = 0.35;
+                e.friction.coulomb[6] = 0.50;
+                // The wrist's feedback authority: 0.1 kg m^2 of reflected rotor inertia on joints 5 to 7 (a
+                // conservative value: the joints accelerated at under 1 rad/s^2 under 0.2 to 0.6 N m of net torque in
+                // loops_4, which franka::Model's 0.003 to 0.013 kg m^2 cannot explain); 0.5 to 0.6 N m at the
+                // acceleration margin instead of 0.02 to 0.06.
+                e.rotorInertia = (Vec7() << 0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.1).finished();
                 v.push_back(e);
             }
             {
@@ -299,6 +308,8 @@ namespace se3pf {
                 throw std::invalid_argument("ExperimentSetup: the friction feedforward needs finite Fc and Fv >= 0");
             if (!std::isfinite(f.velocityScale) || !(f.velocityScale > 0.0))
                 throw std::invalid_argument("ExperimentSetup: the friction feedforward needs a velocity scale > 0");
+            if (!s.rotorInertia.allFinite() || (s.rotorInertia.array() < 0.0).any())
+                throw std::invalid_argument("ExperimentSetup: the rotor inertia must be finite and >= 0");
             return s;
         }
     }  // namespace
@@ -391,8 +402,9 @@ namespace se3pf {
                 v = Violation::NonFinite;
         }
         if (model) {
-            // eq:fb without G (the robot adds its own G, with the configured load), plus the friction feedforward
-            out.tau = model->M * qdd + model->c + out.tauF;
+            // eq:fb without G (the robot adds its own G, with the configured load), with the rotor inertia of the
+            // spec added to M, plus the friction feedforward
+            out.tau = model->M * qdd + setup_.spec().rotorInertia.cwiseProduct(qdd) + model->c + out.tauF;
             out.tauG = out.tau + model->G;
             if (v == Violation::None)
                 v = monitor_.checkTorque(out.tauG, out.tau, tauPrev_, RunConstants::dt);

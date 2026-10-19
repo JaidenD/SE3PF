@@ -123,7 +123,7 @@ namespace franka {
                             // on 2026-10-19), one above it moves against Fc. Zero Fc: the plain plant.
                             const mock::Vec7 D = config_.coulomb.cwiseQuotient(dq_.cwiseAbs().cwiseMax(kCoulombVelocity));
                             mock::Mat7 Mh = plant.mass(q_, plantLoad_);
-                            Mh.diagonal() += h * D;
+                            Mh.diagonal() += config_.rotor + h * D;  // rotor inertia the model does not have
                             const mock::Vec7 ddq = Mh.ldlt().solve(rhs - D.cwiseProduct(dq_));
                             dq_ += h * ddq;
                             q_ += h * dq_;

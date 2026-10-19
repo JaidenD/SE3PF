@@ -161,12 +161,18 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK(e.friction.velocityScale == 0.01);
     }
     Vec7 expected = FrictionFeedforward::gaz2019().coulomb;
-    expected[4] *= 2.0;  // the wrist: twice Gaz (runs loops_2 and loops_3 of 2026-10-19: stuck at the Gaz levels)
-    expected[5] = 0.50;
-    expected[6] *= 2.0;
+    expected[4] = 0.60;  // the wrist: below each joint's breakaway measured on 2026-10-19 (loops_2 to loops_4)
+    expected[5] = 0.35;
+    expected[6] = 0.50;
     CHECK(maxDiff(spec("loops").friction.coulomb, expected) == 0.0);
     CHECK(spec("loops").friction.viscous.isZero());
-    CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.85);  // joint 5: 0.84 N m, the largest
+    CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.65);  // joint 4: 0.64 N m, the largest
+    // The rotor inertia: 0.1 kg m^2 on the wrist of loops, none elsewhere
+    for (const ExperimentSpec& e : all) {
+        CAPTURE(e.name);
+        CHECK(e.rotorInertia.isZero() == (e.name != "loops"));
+    }
+    CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.1, 0.1, 0.1).finished()) == 0.0);
 }
 
 TEST_CASE("SpeedProfile: values, an exact time derivative, continuity at the joints, zero outside")
@@ -385,7 +391,7 @@ TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift a
             CHECK(c.tauF[i] * dqs[i] >= 0.0);
             CHECK(std::abs(c.tauF[i]) <= f.coulomb[i] + 1e-15);
         }
-        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + m.c + c.tauF)) < 1e-12);
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + s.spec().rotorInertia.cwiseProduct(c.qdd) + m.c + c.tauF)) < 1e-12);
         CHECK(maxDiff(c.tauG, Vec7(c.tau + m.G)) < 1e-12);
         // Kinematic only (no model): no torque, but tau_f is still reported (the preflight's log)
         ExperimentLoop kinematic(s, s.monitor());
@@ -394,6 +400,33 @@ TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift a
         CHECK(c.tau.isZero());
         CHECK(c.tauG.isZero());
         CHECK(maxDiff(c.tauF, f.torque(v)) < 1e-12);
+    }
+    // The rotor inertia: tau = (M + diag(Jr)) qdd* + c + tau_f; the preflight's motion is unchanged
+    {
+        ExperimentSpec e = spec("loops");
+        e.rotorInertia = (Vec7() << 0.5, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0).finished();
+        const ExperimentSetup es(ex, e);
+        ExperimentLoop loop(es, es.monitor());
+        ExperimentLoop::Cycle c;
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);
+        REQUIRE(c.violation == Violation::None);
+        CHECK(c.qdd.cwiseAbs().maxCoeff() > 1e-3);
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + e.rotorInertia.cwiseProduct(c.qdd) + m.c + c.tauF)) < 1e-12);
+        ExperimentSpec plain = spec("loops");
+        plain.rotorInertia.setZero();
+        const ExperimentSetup ps(ex, plain);
+        ExperimentLoop loop2(ps, ps.monitor());
+        ExperimentLoop::Cycle c2;
+        loop2.follow(10.0, qs, Vec7::Zero(), &m, c2);
+        loop2.follow(10.0, qs, Vec7::Zero(), &m, c2);
+        CHECK(maxDiff(c2.qdd, c.qdd) == 0.0);  // the same qdd*: only the torque differs
+        CHECK(maxDiff(c2.tau, Vec7(c.tau - e.rotorInertia.cwiseProduct(c.qdd))) < 1e-12);
+        // Invalid values are refused
+        e.rotorInertia[4] = -0.1;
+        CHECK_THROWS_AS(ExperimentSetup(ex, e), std::invalid_argument);
+        e.rotorInertia[4] = std::nan("");
+        CHECK_THROWS_AS(ExperimentSetup(ex, e), std::invalid_argument);
     }
     // Off (the other experiments): tau_f = 0 and tau = M qdd* + c, as before CTRL-1
     {
@@ -432,7 +465,7 @@ TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift a
         loop.follow(10.0, qs, Vec7::Zero(), &light, c);
         CHECK(c.violation == Violation::Torque);
         CHECK_THAT(std::abs(c.tauF[5]), WithinAbs(8.0, 1e-9));
-        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + c.tauF)) < 1e-12);
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + e.rotorInertia.cwiseProduct(c.qdd) + c.tauF)) < 1e-12);
         CHECK(std::abs(c.tau[5]) > 0.6 * 12.0);  // beyond the 60 % margin of joint 6
     }
     // ... and in the torque-rate check: a profile that starts at nu_d at t = 0 with Fc = 1 N m makes the first
@@ -471,10 +504,10 @@ TEST_CASE("preflight with the friction feedforward: loops passes with a model, t
     INFO(r.summary());
     CHECK(r.ok);
     checkWithinLimits(r);
-    // The peak: the largest Fc (joint 5, 0.84 N m), reached while cruising; the summary names it
-    CHECK_THAT(r.peaks.maxTauF, WithinAbs(f.coulomb[4], 2e-3));
-    CHECK(r.peaks.maxTauFJoint == 4);
-    CHECK(r.summary().find("tau_f <= 0.84 N m (joint 5)") != std::string::npos);
+    // The peak: the largest Fc (joint 4, 0.64 N m), reached while cruising; the summary names it
+    CHECK_THAT(r.peaks.maxTauF, WithinAbs(f.coulomb[3], 2e-3));
+    CHECK(r.peaks.maxTauFJoint == 3);
+    CHECK(r.summary().find("tau_f <= 0.64 N m (joint 4)") != std::string::npos);
     // Smooth: the torque rate stays far below the 600 N m/s margin (the sign changes go through tanh)
     CAPTURE(r.peaks.maxTauRate);
     CHECK(r.peaks.maxTauRate < 20.0);
@@ -488,7 +521,9 @@ TEST_CASE("preflight with the friction feedforward: loops passes with a model, t
         ex.lift().eval(row.eta, qs, &dqs);
         const Vec7 expected = f.torque(Vec7(dqs * s.referenceSpeed(row.t)));
         CHECK(maxDiff(row.tauF, expected) < 1e-12);
-        CHECK(maxDiff(row.tau, Vec7(dyn.mass(row.q) * row.qdd + dyn.coriolis(row.q, row.dq) + row.tauF)) < 1e-12);
+        CHECK(maxDiff(row.tau, Vec7(dyn.mass(row.q) * row.qdd + s.spec().rotorInertia.cwiseProduct(row.qdd)
+                                    + dyn.coriolis(row.q, row.dq) + row.tauF))
+              < 1e-12);
         if (row.t > 4.0 && row.t < 30.8 && row.tauF.cwiseAbs().maxCoeff() > 0.1)
             ++felt;
         if (row.t >= 34.8)
@@ -855,10 +890,12 @@ TEST_CASE("preflight: every experiment passes with a dynamics model; the torques
         CHECK(r.summary().find("NOT checked") == std::string::npos);
         checkWithinLimits(r);
         CHECK(r.peaks.maxTauFrac > 0.0);
-        // The torques of the log, recomputed from the model at a few rows (plus the friction feedforward: loops)
+        // The torques of the log, recomputed from the model at a few rows (plus the friction feedforward and the
+        // rotor inertia: loops)
         for (std::size_t k = 0; k < log.size(); k += log.size() / 7) {
             const ExperimentLogRow& row = log[k];
-            const Vec7 tau = dyn.mass(row.q) * row.qdd + dyn.coriolis(row.q, row.dq) + row.tauF;
+            const Vec7 tau = dyn.mass(row.q) * row.qdd + e.rotorInertia.cwiseProduct(row.qdd)
+                             + dyn.coriolis(row.q, row.dq) + row.tauF;
             CHECK(maxDiff(row.tau, tau) < 1e-12);
             CHECK(maxDiff(row.tauG, Vec7(tau + dyn.gravity(row.q))) < 1e-12);
         }

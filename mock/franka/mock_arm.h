@@ -152,6 +152,7 @@ namespace franka::mock {
         double pushTorque = 0.0, pushStart = 0.0, pushDuration = 0.0;
         double friction = 0.0;      // viscous, N m s/rad, every joint, plant only
         Vec7 coulomb = Vec7::Zero();  // Coulomb friction, N m, per joint, plant only (FRANKA_MOCK_COULOMB)
+        Vec7 rotor = Vec7::Zero();    // inertia added to the plant's M diagonal, kg m^2, plant only (FRANKA_MOCK_ROTOR)
         double plantLoad = 0.0;     // extra mass at the flange, plant only, kg
         bool configuredLoad = false;  // the end effector configured in Desk is not the default Franka Hand ...
         RigidBody load;               // ... but this one (and the plant carries it too)
@@ -196,6 +197,12 @@ namespace franka::mock {
             }
             if (auto p = numbers("FRANKA_MOCK_FRICTION", 1); p.first)
                 c.friction = p.second[0];
+            if (auto p = numbers("FRANKA_MOCK_ROTOR", 7, 1); p.first) {
+                const bool perJoint = std::string(std::getenv("FRANKA_MOCK_ROTOR")).find(',') != std::string::npos;
+                c.rotor = perJoint ? fromArray(p.second) : Vec7::Constant(p.second[0]);
+                if ((c.rotor.array() < 0.0).any())
+                    throw std::invalid_argument("mock: FRANKA_MOCK_ROTOR needs values >= 0");
+            }
             if (auto p = numbers("FRANKA_MOCK_COULOMB", 7, 1); p.first) {
                 // one value for every joint, or seven
                 const bool perJoint = std::string(std::getenv("FRANKA_MOCK_COULOMB")).find(',') != std::string::npos;

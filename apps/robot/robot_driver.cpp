@@ -275,6 +275,16 @@ namespace {
                     e.friction.velocityScale);
     }
 
+    // The rotor inertia added to M in the command (ExperimentSpec::rotorInertia)
+    void printRotorInertia(const ExperimentSpec& e, const char* indent)
+    {
+        if (e.rotorInertia.isZero())
+            std::printf("%scommand inertia: franka::Model's M alone\n", indent);
+        else
+            std::printf("%scommand inertia: M + diag%s kg m^2 (reflected rotor inertia)\n", indent,
+                        vecString(e.rotorInertia, 3).c_str());
+    }
+
     const char* modeName(franka::RobotMode m)
     {
         switch (m) {
@@ -798,6 +808,7 @@ namespace {
             std::printf("%d. %-12s %s (%.0f s + time to rest)\n   %s\n   Watch: %s\n", k++, e.name.c_str(),
                         e.title.c_str(), e.duration, e.purpose.c_str(), e.watch.c_str());
             printFriction(e, "   ");
+            printRotorInertia(e, "   ");
         }
         return kOk;
     }
@@ -861,6 +872,7 @@ namespace {
         std::printf("  start q0 = %s rad (|xi0| = %.4f, beta0 = %.3f rad), %.1f s + time to rest\n",
                     vecString(setup.start()).c_str(), spec.xi0.norm(), spec.beta0, spec.duration);
         printFriction(spec, "  ");
+        printRotorInertia(spec, "  ");
 
         // 1. The log, before anything else: a run whose log cannot be written must not move the robot
         if (!checkLogPath(logPath, opt.overwrite))

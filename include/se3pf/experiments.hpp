@@ -97,6 +97,15 @@ namespace se3pf {
         double rampTime = 1.0;  // T of the mu ramp (Controller::setRampTime), s
         SafetyLimits limits;    // the monitor's values; only tighter than HardwareBounds take effect
         FrictionFeedforward friction;  // tau_f of the reference motion; zero (the default): no feedforward
+        // Inertia added to M(q) in the torque command, tau = (M + diag(rotorInertia)) qdd* + c + tau_f, kg m^2 per
+        // joint, zero by default. franka::Model's M is the link-side inertia: 0.013 (joint 5), 0.044 (6) and
+        // 0.003 kg m^2 (7) at the start of loops, so inside the 30 % acceleration margin the feedback could command
+        // only 0.06, 0.26 and 0.02 N m there, while the drives absorb 0.4 to 0.6 N m before the joint torque sensor
+        // (run loops_4, 2026-10-19: joint 5 ran at 0.35 rad/s under 0.80 N m commanded with 0.21 N m realised at
+        // the link). With the reflected rotor inertia added, the same qdd* commands the torque the real joint needs,
+        // and the feedback can hold a joint against a friction error. The preflight integrates qdd* as before; the
+        // torque and torque-rate checks see the larger command. Finite and >= 0 (checked by ExperimentSetup).
+        Vec7 rotorInertia = Vec7::Zero();
     };
 
     // The experiments in the order the lab runs them: hold, loops, recover, paper, self-motion.
@@ -221,7 +230,8 @@ namespace se3pf {
                 bool finished = false;      // t >= T, |qd| < restSpeed, no violation: send tau and end the run
                 Vec7 qdd = Vec7::Zero();    // qdd* = A^-1 (mu - Adot qd)
                 Vec7 tauF = Vec7::Zero();   // the friction feedforward tau_f (FrictionFeedforward; zero if off)
-                Vec7 tau = Vec7::Zero();    // commanded torque M qdd* + c + tau_f (what libfranka is sent; it adds G)
+                Vec7 tau = Vec7::Zero();    // commanded torque (M + diag(Jr)) qdd* + c + tau_f (what libfranka is
+                                            // sent; it adds G)
                 Vec7 tauG = Vec7::Zero();   // tau + G, the torque the joints deliver
                 Status status;
             };
@@ -237,7 +247,8 @@ namespace se3pf {
             // (q, qd), or nullptr (kinematic only: tau = tauG = 0 and no torque check). In order: finite q and qd
             // (NonFinite), Controller::step (Projection), checkOutputs, checkState, checkAcceleration, the friction
             // feedforward tau_f of the spec at v = q*'(eta) referenceSpeed(t) (NonFinite if it is not finite), then
-            // with a model tau = M qdd* + c + tau_f and checkTorque(tau + G, tau, tau of the previous cycle (0
+            // with a model tau = (M + diag(rotorInertia)) qdd* + c + tau_f and checkTorque(tau + G, tau, tau of the
+            // previous cycle (0
             // before the first), dt), then Timeout (t > T + timeoutExtra), then finished. The first violation is
             // reported; after one, the caller switches to the safety stop (SafetyStop) and calls follow no more.
             void follow(double t, const Vec7& q, const Vec7& dq, const ModelTerms* model, Cycle& out);
