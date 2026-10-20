@@ -25,7 +25,8 @@ namespace se3pf {
                 throw std::invalid_argument("JointIdentification: joint index out of range");
         if (!(s_.rampRate > 0.0) || !(s_.stepDuration > 0.0) || !(s_.travelLimit > 0.0) || !(s_.speedLimit > 0.0)
             || !(s_.motionSpeed > 0.0) || !(s_.motionHold >= 0.0) || !(s_.settle > 0.0) || !(s_.blend > 0.0)
-            || !(s_.torqueCap.array() > 0.0).all() || !(s_.stepExtra[0] > 0.0) || !(s_.stepExtra[1] > s_.stepExtra[0])
+            || !(s_.torqueCap.array() > 0.0).all() || !(s_.stepExtra1.array() > 0.0).all()
+            || !(s_.stepExtra2.array() > s_.stepExtra1.array()).all()
             || !q0.allFinite())
             throw std::invalid_argument("JointIdentification: invalid settings");
         for (int j : joints)
@@ -78,7 +79,7 @@ namespace se3pf {
         movingSince_ = -1.0;
         phase_ = p.kind == 0 ? IdentifyPhase::Ramp : IdentifyPhase::Step;
         const double b = breakaway_[joint_][dir_ > 0 ? 0 : 1];
-        stepTau_ = std::isfinite(b) ? b + s_.stepExtra[p.kind - 1 < 0 ? 0 : p.kind - 1] : kNaN;
+        stepTau_ = std::isfinite(b) ? b + (p.kind == 2 ? s_.stepExtra2[joint_] : s_.stepExtra1[joint_]) : kNaN;
         blendFrom_ = lastTau_;
         blendT0_ = t;
     }

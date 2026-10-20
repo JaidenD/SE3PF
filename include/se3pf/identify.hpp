@@ -27,13 +27,18 @@ namespace se3pf {
     struct IdentifySettings {
         double rampRate = 0.5;        // N m/s
         Vec7 torqueCap = (Vec7() << 2.5, 2.5, 2.5, 2.5, 1.5, 1.5, 1.5).finished();  // N m, the ramp's ceiling
-        double stepExtra[2] = {0.3, 0.6};  // N m above the breakaway, the two steps
+        // N m above the breakaway, the two steps, per joint: the big joints (1 kg m^2 and more) need 1 to 2 N m for
+        // a measurable acceleration, the wrist (0.1 kg m^2 command side, identify_1 of 2026-10-20) 0.1 to 0.2 N m
+        // or it hits the speed limit within 0.1 s
+        Vec7 stepExtra1 = (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.1, 0.1, 0.1).finished();
+        Vec7 stepExtra2 = (Vec7() << 2.0, 2.0, 2.0, 2.0, 0.2, 0.2, 0.2).finished();
         double stepDuration = 0.3;    // s
         double travelLimit = 0.08;    // rad from the pulse's start: the pulse ends there
         double speedLimit = 0.5;      // rad/s: the pulse ends there
-        double motionSpeed = 0.01;    // rad/s (the robot's dq noise at rest is about 1e-3) ...
-        double motionHold = 0.02;     // ... for this long: the joint has broken away
-        double settle = 1.0;          // s of hold between pulses
+        double motionSpeed = 0.02;    // rad/s (identify_1: the hold's settling on the gravity-loaded joints 2 to 4
+                                      // tripped 0.01 within 0.1 to 0.6 s of the ramp) ...
+        double motionHold = 0.03;     // ... for this long: the joint has broken away
+        double settle = 2.0;          // s of hold between pulses (the hold must be still before a ramp)
         double blend = 0.05;          // s over which a change of the command is blended
     };
 

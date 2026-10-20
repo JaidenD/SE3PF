@@ -894,11 +894,12 @@ namespace {
                 joints.push_back(j);
         const std::string logPath = opt.logPath.empty() ? defaultLogPath("identify") : opt.logPath;
         std::printf("Joint identification: for each of %zu joint(s), in each direction, a torque ramp at %.2f N m/s "
-                    "until the joint moves (cap %s N m), then two torque steps of %.1f and %.1f N m above the "
+                    "until the joint moves (cap %s N m), then two torque steps of %s and %s N m above the "
                     "breakaway for %.2f s (at most %.2f rad of travel, %.1f rad/s); the other joints held where "
                     "they are.\n",
-                    joints.size(), settings.rampRate, vecString(settings.torqueCap, 1).c_str(), settings.stepExtra[0],
-                    settings.stepExtra[1], settings.stepDuration, settings.travelLimit, settings.speedLimit);
+                    joints.size(), settings.rampRate, vecString(settings.torqueCap, 1).c_str(),
+                    vecString(settings.stepExtra1, 1).c_str(), vecString(settings.stepExtra2, 1).c_str(),
+                    settings.stepDuration, settings.travelLimit, settings.speedLimit);
         if (!checkLogPath(logPath, opt.overwrite))
             return kLogError;
         franka::Model model = robot.loadModel();
@@ -921,7 +922,7 @@ namespace {
         for (int j : joints) {
             const double margin = std::min(q0[j] - PandaArm::qMin()[j], PandaArm::qMax()[j] - q0[j]);
             const double need = settings.travelLimit + b.jointMargin + 0.05;
-            const double tauPeak = settings.torqueCap[j] + settings.stepExtra[1] + std::abs(G[j]);
+            const double tauPeak = settings.torqueCap[j] + settings.stepExtra2[j] + std::abs(G[j]);
             const double tauLimit = b.tauFrac * PandaArm::tauMax()[j];
             std::printf("  joint %d: margin %.3f rad [needs %.3f], peak |tau + G| %.1f N m [%.1f]%s\n", j + 1, margin,
                         need, tauPeak, tauLimit, margin >= need && tauPeak <= tauLimit ? "" : "  FAILS");

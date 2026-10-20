@@ -163,7 +163,7 @@ TEST_CASE("JointIdentification: refusals, non-finite measurements, the hold law"
     bad.rampRate = 0.0;
     CHECK_THROWS_AS(JointIdentification(bad, {0}, q0), std::invalid_argument);
     bad = s;
-    bad.stepExtra[1] = bad.stepExtra[0];
+    bad.stepExtra2[2] = bad.stepExtra1[2];
     CHECK_THROWS_AS(JointIdentification(bad, {0}, q0), std::invalid_argument);
     bad = s;
     bad.torqueCap[3] = -1.0;
