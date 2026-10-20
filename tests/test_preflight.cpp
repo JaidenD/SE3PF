@@ -182,7 +182,7 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CAPTURE(e.name);
         const bool frictionOn = e.name == "loops" || e.name == "loops-friction";
         CHECK(e.friction.active() == frictionOn);
-        CHECK(e.friction.velocityScale == (frictionOn || e.name == "loops-inertia" ? 0.005 : 0.01));
+        CHECK(e.friction.velocityScale == (frictionOn ? 0.005 : 0.01));
     }
     Vec7 expected = FrictionFeedforward::gaz2019().coulomb;
     expected[0] = 0.70;  // joint 1: stuck under 0.58 N m (loops_7) and 0.80 N m (loops_6)

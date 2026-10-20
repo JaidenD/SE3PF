@@ -12,6 +12,7 @@
 //   of the xi one; CTRL-1), compute_us, period_ms, success_rate (the last three are the driver's: time spent in the
 //   callback, libfranka's period, and the robot's control_command_success_rate; 0 in predictions, as tauJ).
 #include "se3pf/experiments.hpp"
+#include "se3pf/identify.hpp"
 
 #include <cstddef>
 #include <fstream>
@@ -54,6 +55,32 @@ namespace se3pf::robot {
         writeLogHeader(f);
         for (std::size_t k = 0; k < count && k < rows.size(); ++k)
             writeLogRow(f, rows[k]);
+        return static_cast<bool>(f);
+    }
+
+    // The identification run's log (se3pf/identify.hpp): t, phase (0 hold, 1 ramp, 2 step, 3 safety stop), joint
+    // (1-based active joint, 0 none), dir, pulse (0 ramp, 1 and 2 steps, -1 none), pulse_tau, tau1..7 (commanded,
+    // without G), q1..7, dq1..7, tauJ1..7 (measured link-side torque), G1..7 (the model's gravity), compute_us,
+    // period_ms.
+    inline bool writeIdentifyCsv(const std::string& path, const std::vector<IdentifyLogRow>& rows, std::size_t count)
+    {
+        std::ofstream f(path);
+        if (!f)
+            return false;
+        f.precision(10);
+        f << "t,phase,joint,dir,pulse,pulse_tau";
+        for (const char* name : {"tau", "q", "dq", "tauJ", "G"})
+            for (int i = 1; i <= 7; ++i)
+                f << ',' << name << i;
+        f << ",compute_us,period_ms\n";
+        for (std::size_t k = 0; k < count && k < rows.size(); ++k) {
+            const IdentifyLogRow& r = rows[k];
+            f << r.t << ',' << r.phase << ',' << r.joint << ',' << r.direction << ',' << r.pulse << ',' << r.pulseTorque;
+            for (const Vec7* v : {&r.tau, &r.q, &r.dq, &r.tauJ, &r.G})
+                for (int i = 0; i < 7; ++i)
+                    f << ',' << (*v)[i];
+            f << ',' << r.computeUs << ',' << r.periodMs << '\n';
+        }
         return static_cast<bool>(f);
     }
 

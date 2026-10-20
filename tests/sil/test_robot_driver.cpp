@@ -8,8 +8,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "se3pf/experiments.hpp"
+#include "se3pf/identify.hpp"
 #include "se3pf/panda.hpp"
 #include "test_helpers.hpp"
+#include "franka/mock_arm.h"  // the mock's toy arm, for the expected inertia
 
 #include <sys/wait.h>
 #include <unistd.h>  // getpid
@@ -597,6 +599,71 @@ TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1)
         CHECK(predMax >= fc.maxCoeff() - 1e-6);
         CHECK(predMax <= tauFBound(loops).maxCoeff());
     }
+}
+
+TEST_CASE("robot_driver_mock: joint identification on the simulated robot recovers its friction and inertia",
+          SLOW_IN_DEBUG)
+{
+    // The plant: Coulomb friction and rotor inertia the model does not have; the identification of joints 2 and 6
+    // must find the breakaway at the Coulomb level, the kinetic friction, and the inertia as the mock's M plus the
+    // rotor (the mock's torque sensor reads the command plus G, so the sensor-side inertia is the same)
+    const Vec7 fc = (Vec7() << 0.8, 1.2, 0.7, 0.6, 0.7, 0.4, 0.6).finished();
+    const Vec7 rotor = (Vec7() << 0, 0, 0, 0, 0.3, 0.3, 0.3).finished();
+    const std::string env = coulombEnv(fc) + " FRANKA_MOCK_ROTOR=" + csv7(rotor);
+    for (int joint : {2, 6}) {
+        CAPTURE(joint);
+        const std::string name = "identify_" + std::to_string(joint);
+        const Run r = run("0.0.0.0 identify --yes --joint=" + std::to_string(joint) + " " + logArg(name), env);
+        INFO(r.out);
+        REQUIRE(r.code == 0);
+        CHECK(r.contains("callback allocations: 0"));
+        CHECK_FALSE(r.contains("SAFETY STOP"));
+        CHECK_FALSE(r.contains("not found"));
+        const Csv log = readCsv(logPath(name));
+        REQUIRE(log.rows.size() > 5000);
+        // From the log: the fit the driver printed, recomputed here
+        std::vector<IdentifyLogRow> rows;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            IdentifyLogRow row;
+            row.t = log.at(k, "t");
+            row.phase = static_cast<int>(log.at(k, "phase"));
+            row.joint = static_cast<int>(log.at(k, "joint"));
+            row.direction = static_cast<int>(log.at(k, "dir"));
+            row.pulse = static_cast<int>(log.at(k, "pulse"));
+            row.pulseTorque = log.at(k, "pulse_tau");
+            row.tau = log.vec(k, "tau");
+            row.q = log.vec(k, "q");
+            row.dq = log.vec(k, "dq");
+            row.tauJ = log.vec(k, "tauJ");
+            row.G = log.vec(k, "G");
+            rows.push_back(row);
+        }
+        const std::vector<JointIdentificationResult> fit = fitIdentification(rows, IdentifySettings());
+        const JointIdentificationResult& x = fit[static_cast<std::size_t>(joint - 1)];
+        // The mock's M at the rest posture (its model's mass matrix) plus the rotor
+        const double mModel = franka::mock::ToyArm(1.0).mass(PandaArm::restPosture(), franka::mock::frankaHand())(joint - 1, joint - 1);
+        for (int d = 0; d < 2; ++d) {
+            CAPTURE(d, x.breakawayCmd[d], x.kineticFriction[d], x.inertiaCmd[d], mModel + rotor[joint - 1]);
+            REQUIRE(x.found[d]);
+            CHECK_THAT(x.breakawayCmd[d], Catch::Matchers::WithinAbs(fc[joint - 1], 0.08));
+            CHECK(x.breakawayRaw[d] >= x.breakawayCmd[d]);
+            REQUIRE(x.inertiaFound[d]);
+            CHECK_THAT(x.kineticFriction[d], Catch::Matchers::WithinAbs(fc[joint - 1], 0.1));
+            CHECK_THAT(x.inertiaCmd[d], Catch::Matchers::WithinRel(mModel + rotor[joint - 1], 0.2));
+        }
+        // Every joint ends where it started, within the travel of the pulses, at rest
+        const std::size_t last = log.rows.size() - 1;
+        CHECK(testing::maxDiff(log.vec(last, "q"), log.vec(0, "q")) < 0.5);
+        CHECK(log.vec(last, "dq").norm() < 0.02);
+    }
+    // Refusals: a joint index out of range, a log that exists, a dry run moves nothing
+    CHECK(run("0.0.0.0 identify --yes --joint=8").code == 1);
+    CHECK(run("0.0.0.0 identify --yes --joint=0").code == 1);
+    CHECK(run("0.0.0.0 identify --yes --joint=x").code == 1);
+    const Run dry = run("0.0.0.0 identify --yes --dry-run --joint=3 " + logArg("identify_dry"));
+    CHECK(dry.code == 0);
+    CHECK(dry.contains("Dry run: no motion."));
+    CHECK_FALSE(fs::exists(logPath("identify_dry")));
 }
 
 TEST_CASE("robot_driver_mock: late periods (lost packets): the run keeps time and its margins", SLOW_IN_DEBUG)

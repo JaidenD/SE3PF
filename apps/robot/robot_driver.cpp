@@ -18,6 +18,11 @@
 //                                                              own model (load included); no motion
 //   robot_driver <ip> error-recovery                           automaticErrorRecovery() after a reflex; no motion
 //                                                              (not to be confused with the experiment 'recover')
+//   robot_driver <ip> identify [--joint=N] [--log=file.csv] [--overwrite]
+//                                                              joint identification (se3pf/identify.hpp): torque
+//                                                              ramps and steps on one joint at a time from where
+//                                                              the arm is, the others held; MOVES each joint by up
+//                                                              to 0.08 rad
 //   robot_driver <ip> <experiment> [--dry-run] [--log=file.csv] [--overwrite]
 //                                                              one experiment (below); --no-rt only with --dry-run
 //
@@ -70,6 +75,7 @@
 #include "franka_convert.hpp"
 #include "robot_log.hpp"
 #include "se3pf/experiments.hpp"
+#include "se3pf/identify.hpp"
 #include "se3pf/panda.hpp"
 #include "se3pf/panda_example.hpp"
 #include "se3pf/preflight.hpp"
@@ -163,6 +169,7 @@ namespace {
         std::string ip;
         std::string command;       // check, preflight, error-recovery, or an experiment name
         std::string which = "all"; // preflight: one experiment or all
+        int joint = 0;             // identify: 1-based joint, 0 = all
         std::string logPath;       // run: the log file (default robot_<name>_<time>.csv)
         std::string logDir;        // preflight: write the predictions there
         bool dryRun = false;
@@ -181,6 +188,7 @@ namespace {
                   << "       " << prog << " <robot-ip> check [--no-rt]\n"
                   << "       " << prog << " <robot-ip> preflight [experiment|all] [--log-dir=DIR] [--no-rt]\n"
                   << "       " << prog << " <robot-ip> error-recovery\n"
+                  << "       " << prog << " <robot-ip> identify [--joint=N] [--log=file.csv] [--overwrite]\n"
                   << "       " << prog << " <robot-ip> <experiment> [--dry-run [--no-rt]] [--log=file.csv] "
                                           "[--overwrite]\n"
 #ifdef SE3PF_MOCK_FRANKA
@@ -871,6 +879,195 @@ namespace {
         return ok ? kOk : kPreflight;
     }
 
+    // Joint identification (se3pf/identify.hpp): from where the arm is, hold every joint with the damped hold and
+    // pulse one joint at a time. The same gates as a run: log path, kinematics, load, a static check of the torque
+    // budget, realtime, Idle and at rest, Enter; the monitor's state and torque checks every cycle; the safety
+    // stop on a violation.
+    int cmdIdentify(franka::Robot& robot, const PandaExample& example, const Options& opt)
+    {
+        const IdentifySettings settings;
+        std::vector<int> joints;
+        if (opt.joint > 0)
+            joints.push_back(opt.joint - 1);
+        else
+            for (int j = 0; j < 7; ++j)
+                joints.push_back(j);
+        const std::string logPath = opt.logPath.empty() ? defaultLogPath("identify") : opt.logPath;
+        std::printf("Joint identification: for each of %zu joint(s), in each direction, a torque ramp at %.2f N m/s "
+                    "until the joint moves (cap %s N m), then two torque steps of %.1f and %.1f N m above the "
+                    "breakaway for %.2f s (at most %.2f rad of travel, %.1f rad/s); the other joints held where "
+                    "they are.\n",
+                    joints.size(), settings.rampRate, vecString(settings.torqueCap, 1).c_str(), settings.stepExtra[0],
+                    settings.stepExtra[1], settings.stepDuration, settings.travelLimit, settings.speedLimit);
+        if (!checkLogPath(logPath, opt.overwrite))
+            return kLogError;
+        franka::Model model = robot.loadModel();
+        franka::RobotState state = robot.readOnce();
+        printState(state);
+        if (!checkKinematics(model, state, checkConfigurations(example)))
+            return kKinematics;
+        printLoad(state);
+        if (!askYes(opt, "Does this load match the end effector mounted on the robot right now?")) {
+            std::printf("Aborted: set the end effector in Desk (Settings > End Effector), then run again.\n");
+            return kAborted;
+        }
+        // The static preflight: every joint far enough from its limits for the travel, and the largest command
+        // (the cap plus the hold's clamp is never both; the cap plus gravity) inside the torque margin
+        const Vec7 q0 = vec7(state.q);
+        const Vec7 G = vec7(model.gravity(state));
+        const SafetyMonitor monitor;
+        const SafetyLimits& b = monitor.limits();
+        bool ok = true;
+        for (int j : joints) {
+            const double margin = std::min(q0[j] - PandaArm::qMin()[j], PandaArm::qMax()[j] - q0[j]);
+            const double need = settings.travelLimit + b.jointMargin + 0.05;
+            const double tauPeak = settings.torqueCap[j] + settings.stepExtra[1] + std::abs(G[j]);
+            const double tauLimit = b.tauFrac * PandaArm::tauMax()[j];
+            std::printf("  joint %d: margin %.3f rad [needs %.3f], peak |tau + G| %.1f N m [%.1f]%s\n", j + 1, margin,
+                        need, tauPeak, tauLimit, margin >= need && tauPeak <= tauLimit ? "" : "  FAILS");
+            ok = ok && margin >= need && tauPeak <= tauLimit;
+        }
+        if (!ok) {
+            std::printf("Aborted: move the arm (Desk guiding mode) so that every joint has room, or identify fewer "
+                        "joints. Nothing moved.\n");
+            return kPreflight;
+        }
+        JointIdentification ident(settings, joints, q0);
+        std::printf("  at most %.0f s\n", ident.duration());
+
+        std::string rtDetail;
+        const bool realtime = realtimeKernel(rtDetail);
+        state = robot.readOnce();
+        if (opt.dryRun) {
+            std::printf("Dry run: no motion. For a run: robot mode %s (needs Idle); %s realtime kernel (%s).\n",
+                        modeName(state.robot_mode), realtime ? "a" : "NO", rtDetail.c_str());
+            return kOk;
+        }
+#ifndef SE3PF_MOCK_FRANKA
+        if (!realtime) {
+            std::printf("Not ready: this PC has no realtime kernel (%s). Nothing moved.\n", rtDetail.c_str());
+            return kNotReady;
+        }
+#endif
+        if (!readyToApproach(state, q0))
+            return kNotReady;
+        setDefaultBehavior(robot);
+        char what[300];
+        std::snprintf(what, sizeof(what),
+                      "The robot will MOVE: torque pulses on %zu joint(s), each by at most %.2f rad, for up to %.0f s. "
+                      "Keep the user stop in hand.",
+                      joints.size(), settings.travelLimit, ident.duration());
+        if (!confirm(opt, what))
+            return kAborted;
+        state = robot.readOnce();
+        if (!readyToApproach(state, q0))
+            return kNotReady;
+        if (!((vec7(state.q) - q0).cwiseAbs().maxCoeff() <= kStartTolerance)) {
+            std::printf("Not ready: the arm moved while waiting for Enter. Nothing moved; run again.\n");
+            return kNotReady;
+        }
+
+        // The torque loop
+        const std::size_t capacity =
+            static_cast<std::size_t>(std::ceil((ident.duration() + RunConstants::stopTime + 2.0) / RunConstants::dt));
+        std::vector<IdentifyLogRow> log(capacity);
+        std::size_t rows = 0;
+        double t = 0.0, tStop = -1.0, maxDrift = 0.0, maxCompute = 0.0;
+        long late = 0;
+        bool stopping = false, stopSettled = false;
+        Violation violation = Violation::None;
+        SafetyStop stop;
+        Vec7 tauPrev = Vec7::Zero();
+        int code = kOk;
+        std::function<franka::Torques(const franka::RobotState&, franka::Duration)> callback =
+            [&](const franka::RobotState& s, franka::Duration period) -> franka::Torques {
+            SE3PF_CALLBACK_BEGIN();
+            const auto start = std::chrono::steady_clock::now();
+            t += period.toSec();
+            const Vec7 q = vec7(s.q), dq = vec7(s.dq);
+            const Vec7 g = vec7(model.gravity(s));
+            Vec7 tau = Vec7::Zero();
+            bool done = false;
+            if (!stopping) {
+                tau = ident.step(t, q, dq, done);
+                Violation v = monitor.checkState(q, dq);
+                if (v == Violation::None)
+                    v = monitor.checkTorque(Vec7(tau + g), tau, tauPrev, RunConstants::dt);
+                if (v == Violation::None && !(q.allFinite() && dq.allFinite()))
+                    v = Violation::NonFinite;
+#ifdef SE3PF_MOCK_FRANKA
+                if (opt.inject != Violation::None && t >= opt.injectTime && v == Violation::None)
+                    v = opt.inject;
+#endif
+                tauPrev = tau;
+                if (v != Violation::None) {
+                    stopping = true;
+                    violation = v;
+                    tStop = t;
+                    stop.begin(t, q);
+                    done = false;
+                }
+            }
+            if (stopping) {
+                tau = stop.step(t, q, dq, done);
+                maxDrift = std::max(maxDrift, (q - stop.holdConfiguration()).cwiseAbs().maxCoeff());
+                stopSettled = stop.settled();
+            }
+            if (rows < log.size()) {
+                IdentifyLogRow& row = log[rows++];
+                row.t = t;
+                row.phase = stopping ? 3 : static_cast<int>(ident.phase());
+                row.joint = stopping ? 0 : ident.activeJoint() + 1;
+                row.direction = stopping ? 0 : ident.direction();
+                row.pulse = stopping ? -1 : ident.pulse();
+                row.pulseTorque = stopping ? 0.0 : ident.pulseTorque();
+                row.tau = tau;
+                row.q = q;
+                row.dq = dq;
+                row.tauJ = vec7(s.tau_J);
+                row.G = g;
+                row.periodMs = static_cast<double>(period.toMSec());
+                row.computeUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+                                    .count();
+                maxCompute = std::max(maxCompute, row.computeUs);
+                if (rows > 1 && row.periodMs > 1.0)
+                    ++late;
+            }
+            const franka::Torques command(array7(tau));
+            SE3PF_CALLBACK_END();
+            return done ? franka::MotionFinished(command) : command;
+        };
+        try {
+            robot.control(callback, true, franka::kDefaultCutoffFrequency);
+            code = violation != Violation::None ? kSafetyStop : kOk;
+        } catch (const franka::ControlException& e) {
+            std::printf("ROBOT REFLEX / CONTROL ERROR: %s\n", e.what());
+            std::ofstream f(logPath + ".reflex.csv");
+            if (f)
+                f << franka::logToCSV(e.log);
+            code = kRobotError;
+        } catch (const std::exception& e) {
+            std::printf("ERROR in the torque loop: %s\n", e.what());
+            code = kRobotError;
+        }
+        const bool written = writeIdentifyCsv(logPath, log, rows);
+        std::printf("Log: %s (%zu rows)%s\n", logPath.c_str(), rows, written ? "" : "  COULD NOT BE WRITTEN");
+        std::printf("Identification: %zu callbacks over %.3f s; callback at most %.0f us, %ld periods longer than 1 "
+                    "ms\n",
+                    rows, t, maxCompute, late);
+#ifdef SE3PF_MOCK_FRANKA
+        std::printf("  callback allocations: %ld\n", gCallbackAllocations.load());
+#endif
+        if (violation != Violation::None)
+            std::printf("SAFETY STOP: %s at t = %.3f s; held until t = %.3f s: largest joint drift %.4f rad%s\n",
+                        toString(violation), tStop, t, maxDrift, stopSettled ? " (at rest)" : "");
+        std::vector<IdentifyLogRow> used(log.begin(), log.begin() + static_cast<long>(rows));
+        std::printf("Results (fit of the log):\n%s", identificationSummary(fitIdentification(used, settings)).c_str());
+        if (!written && code == kOk)
+            code = kLogError;
+        return code;
+    }
+
     int cmdRecover(franka::Robot& robot, const Options& opt)
     {
         const franka::RobotState state = robot.readOnce();
@@ -1079,6 +1276,13 @@ namespace {
 #endif
             else if (opt.command == "preflight" && a.rfind("--", 0) != 0 && opt.which == "all")
                 opt.which = a;
+            else if (opt.command == "identify" && a.rfind("--joint=", 0) == 0) {
+                const std::string v = a.substr(8);
+                char* end = nullptr;
+                opt.joint = static_cast<int>(std::strtol(v.c_str(), &end, 10));
+                if (v.empty() || end != v.c_str() + v.size() || opt.joint < 1 || opt.joint > 7)
+                    return false;
+            }
             else
                 return false;
         }
@@ -1097,7 +1301,8 @@ int main(int argc, char** argv)
         return kUsage;
     }
     const ExperimentSpec* spec = nullptr;
-    const bool known = opt.command == "check" || opt.command == "preflight" || opt.command == "error-recovery";
+    const bool known = opt.command == "check" || opt.command == "preflight" || opt.command == "error-recovery"
+                       || opt.command == "identify";
     if (!known) {
         spec = findExperiment(opt.command);
         if (spec == nullptr) {
@@ -1113,7 +1318,7 @@ int main(int argc, char** argv)
 #ifndef SE3PF_MOCK_FRANKA
     // libfranka checks realtime only when a motion starts, so check, preflight, error-recovery and --dry-run never
     // need --no-rt; its only effect on a run would be a robot moving without realtime scheduling.
-    if (opt.noRt && spec != nullptr && !opt.dryRun) {
+    if (opt.noRt && (spec != nullptr || opt.command == "identify") && !opt.dryRun) {
         std::fprintf(stderr, "--no-rt is refused for a run that moves the robot: the torque loop needs a PREEMPT_RT "
                              "kernel (docs/HARDWARE.md, section 2).\n");
         return kUsage;
@@ -1142,6 +1347,8 @@ int main(int argc, char** argv)
             return cmdPreflight(robot, example, opt);
         if (opt.command == "error-recovery")
             return cmdRecover(robot, opt);
+        if (opt.command == "identify")
+            return cmdIdentify(robot, example, opt);
 #ifdef SE3PF_MOCK_FRANKA
         // Test only: the experiment with the controller as before CTRL-1 (tests reproduce the stall of 2026-10-19)
         ExperimentSpec before = *spec;
