@@ -196,20 +196,20 @@ namespace se3pf {
                 a.friction = FrictionFeedforward();
                 a.rotorInertia.setZero();
                 v.push_back(a);
-                // The paper's PD with the friction model only (2026-10-20): no integral action, no rotor inertia in
-                // the command; the robustness demonstration the paper's argument needs, if the wrist can follow
+                // The paper's PD with the model terms only (2026-10-20): the friction feedforward and the wrist's
+                // rotor inertia in the inverse dynamics, no integral action. Without the rotor inertia
+                // (loops_friction_1 to _3, 2026-10-20) the wrist stuck or, once free, ran to the acceleration
+                // margin: franka::Model's link-side M sizes the wrist's correction 30 times too small.
                 ExperimentSpec f = e;
                 f.name = "loops-friction";
-                f.title = "Two loops at constant speed: PD with the friction model only";
-                f.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15) and the friction feedforward in the "
-                            "inverse dynamics, but no integral action and franka::Model's M alone (no rotor "
-                            "inertia): the paper's control law with a friction model (CTRL-1, 2026-10-20).";
-                f.watch = "Pass criteria as 'loops'. With franka::Model's wrist inertia the feedback can command "
-                          "only 0.02 to 0.06 N m on joints 5 to 7 inside the acceleration margin, and the "
-                          "feedforward sits below their breakaway, so the wrist is expected to lag the lift and "
-                          "beta to drift (loops_3 and loops_4 of 2026-10-19).";
+                f.title = "Two loops at constant speed: PD with the friction and inertia model, no integral action";
+                f.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15), the friction feedforward and the "
+                            "wrist's rotor inertia in the inverse dynamics, but no integral action: the paper's "
+                            "control law with a corrected plant model (CTRL-1, 2026-10-20).";
+                f.watch = "Pass criteria as 'loops'. Expect the steady errors a PD leaves under the remaining model "
+                          "error: eta_dot at 70 to 80 % of nu_d, |xi| about 0.01, beta drifting to a few hundredths "
+                          "where the joints lag the lift (loops_7 and loops_8 of 2026-10-19).";
                 f.gains.kiEta = f.gains.Ki = f.gains.KiBeta = 0.0;
-                f.rotorInertia.setZero();
                 v.push_back(f);
             }
             {

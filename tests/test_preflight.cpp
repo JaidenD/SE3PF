@@ -195,7 +195,7 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
     // The rotor inertia: 0.3 kg m^2 on the wrist of loops, none elsewhere
     for (const ExperimentSpec& e : all) {
         CAPTURE(e.name);
-        CHECK(e.rotorInertia.isZero() == (e.name != "loops"));
+        CHECK(e.rotorInertia.isZero() == (e.name != "loops" && e.name != "loops-friction"));
     }
     CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.5, 0.5, 0.5).finished()) == 0.0);
 }
