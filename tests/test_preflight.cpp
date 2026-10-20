@@ -93,9 +93,9 @@ namespace {
 TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is valid and never loosens a margin")
 {
     const std::vector<ExperimentSpec>& all = experiments();
-    REQUIRE(all.size() == 6);
-    const char* order[] = {"hold", "loops", "loops-integral", "recover", "paper", "self-motion"};
-    for (int i = 0; i < 6; ++i) {
+    REQUIRE(all.size() == 7);
+    const char* order[] = {"hold", "loops", "loops-integral", "loops-friction", "recover", "paper", "self-motion"};
+    for (int i = 0; i < 7; ++i) {
         CAPTURE(i);
         CHECK(all[i].name == order[i]);
         CHECK(findExperiment(order[i]) == &all[i]);
@@ -117,14 +117,20 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK(e.rampTime >= 1.0);
         CHECK(e.rampTime <= 2.0);
         // The paper's poles at -4 and k_t = 5, except loops: poles at -6 and k_t = 10 (CTRL-1, 2026-10-19)
-        const bool loopsLike = e.name == "loops" || e.name == "loops-integral";
+        const bool loopsLike = e.name == "loops" || e.name == "loops-integral" || e.name == "loops-friction";
         const double lambda = loopsLike ? 6.0 : 4.0;
         CHECK(e.gains.Kp == lambda * lambda);
         CHECK(e.gains.Kd == 2.0 * lambda);
         CHECK(e.gains.KpBeta == lambda * lambda);
         CHECK(e.gains.KdBeta == 2.0 * lambda);
         // Integral action only in loops (CTRL-1)
-        if (loopsLike) {
+        if (e.name == "loops-friction") {
+            CHECK(e.gains.kiEta == 0.0);
+            CHECK(e.gains.Ki == 0.0);
+            CHECK(e.gains.KiBeta == 0.0);
+            CHECK(e.friction.active());
+            CHECK(e.rotorInertia.isZero());
+        } else if (loopsLike) {
             CHECK(e.gains.kiEta == 25.0);
             CHECK(e.gains.Ki == 36.0);
             CHECK(e.gains.KiBeta == 36.0);
@@ -173,8 +179,9 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
     // 2026-10-19 before it)
     for (const ExperimentSpec& e : all) {
         CAPTURE(e.name);
-        CHECK(e.friction.active() == (e.name == "loops"));
-        CHECK(e.friction.velocityScale == (e.name == "loops" ? 0.005 : 0.01));
+        const bool frictionOn = e.name == "loops" || e.name == "loops-friction";
+        CHECK(e.friction.active() == frictionOn);
+        CHECK(e.friction.velocityScale == (frictionOn ? 0.005 : 0.01));
     }
     Vec7 expected = FrictionFeedforward::gaz2019().coulomb;
     expected[0] = 0.70;  // joint 1: stuck under 0.58 N m (loops_7) and 0.80 N m (loops_6)

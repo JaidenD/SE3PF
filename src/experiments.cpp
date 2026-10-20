@@ -196,6 +196,21 @@ namespace se3pf {
                 a.friction = FrictionFeedforward();
                 a.rotorInertia.setZero();
                 v.push_back(a);
+                // The paper's PD with the friction model only (2026-10-20): no integral action, no rotor inertia in
+                // the command; the robustness demonstration the paper's argument needs, if the wrist can follow
+                ExperimentSpec f = e;
+                f.name = "loops-friction";
+                f.title = "Two loops at constant speed: PD with the friction model only";
+                f.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15) and the friction feedforward in the "
+                            "inverse dynamics, but no integral action and franka::Model's M alone (no rotor "
+                            "inertia): the paper's control law with a friction model (CTRL-1, 2026-10-20).";
+                f.watch = "Pass criteria as 'loops'. With franka::Model's wrist inertia the feedback can command "
+                          "only 0.02 to 0.06 N m on joints 5 to 7 inside the acceleration margin, and the "
+                          "feedforward sits below their breakaway, so the wrist is expected to lag the lift and "
+                          "beta to drift (loops_3 and loops_4 of 2026-10-19).";
+                f.gains.kiEta = f.gains.Ki = f.gains.KiBeta = 0.0;
+                f.rotorInertia.setZero();
+                v.push_back(f);
             }
             {
                 ExperimentSpec e = base;
