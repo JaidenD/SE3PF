@@ -210,15 +210,30 @@ namespace se3pf {
                           "error: eta_dot at 70 to 80 % of nu_d, |xi| about 0.01, beta drifting to a few hundredths "
                           "where the joints lag the lift (loops_7 and loops_8 of 2026-10-19).";
                 f.gains.kiEta = f.gains.Ki = f.gains.KiBeta = 0.0;
+                // The measured plant model (identify_3, 2026-10-20, logs/identify_3.csv), nothing tuned on loops:
+                // the inertia the command needs beyond franka::Model's link-side M, about 1.0 kg m^2 on joints 1 to
+                // 4 and 0.10 to 0.16 on the wrist (command-side minus sensor-side inertia of the torque steps), and
+                // the Coulomb level at the smaller of the two directions' breakaways (joints 2 and 4 are strongly
+                // direction dependent under their gravity load, 0.4 / 1.4 and 1.3 / 0.3 N m: not in this model).
+                f.friction = FrictionFeedforward();
+                f.friction.coulomb = (Vec7() << 0.65, 0.40, 0.20, 0.30, 0.60, 0.30, 0.35).finished();
+                f.friction.velocityScale = 0.005;
+                f.rotorInertia = (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished();
+                f.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15) and the plant model measured by "
+                            "'identify' on 2026-10-20 (breakaway friction and the drive inertia missing from "
+                            "franka::Model), no integral action: the paper's control law with a measured model.";
+                f.watch = "Pass criteria as 'loops'. The steady errors a PD leaves under the remaining model error "
+                          "(friction scatter of 20 to 40 %, direction dependence on joints 2 and 4) are the result.";
                 v.push_back(f);
                 // The PD with the wrist's rotor inertia only (2026-10-20): no friction feedforward, no integral
                 // action; the feedback alone against the robot's friction
                 ExperimentSpec m = f;
                 m.name = "loops-inertia";
                 m.title = "Two loops at constant speed: PD with the wrist inertia only";
-                m.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15) and the wrist's rotor inertia in "
-                            "the inverse dynamics, but no friction feedforward and no integral action: the paper's "
-                            "control law against the robot's friction with a corrected M only (CTRL-1, 2026-10-20).";
+                m.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15) and the drive inertia measured by "
+                            "'identify' in the inverse dynamics, but no friction model and no integral action: the "
+                            "paper's control law against the robot's friction with a measured M only (CTRL-1, "
+                            "2026-10-20).";
                 m.watch = "Pass criteria as 'loops'. Every joint must break its own static friction (0.5 to 1.2 N m) "
                           "through the feedback: expect larger lags than with the feedforward, eta_dot well below "
                           "nu_d and beta drifting; a stall or a Redundancy stop is possible.";

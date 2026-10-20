@@ -130,7 +130,12 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
             CHECK(e.gains.Ki == 0.0);
             CHECK(e.gains.KiBeta == 0.0);
             CHECK(e.friction.active() == (e.name == "loops-friction"));
-            CHECK(maxDiff(e.rotorInertia, spec("loops").rotorInertia) == 0.0);
+            // Both carry the inertia measured by 'identify' on 2026-10-20; loops-friction the measured friction too
+            CHECK(maxDiff(e.rotorInertia, (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished()) == 0.0);
+            if (e.name == "loops-friction") {
+                CHECK(maxDiff(e.friction.coulomb, (Vec7() << 0.65, 0.40, 0.20, 0.30, 0.60, 0.30, 0.35).finished()) == 0.0);
+                CHECK(e.friction.viscous.isZero());
+            }
         } else if (loopsLike) {
             CHECK(e.gains.kiEta == 25.0);
             CHECK(e.gains.Ki == 36.0);
