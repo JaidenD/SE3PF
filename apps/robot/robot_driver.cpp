@@ -992,8 +992,10 @@ namespace {
             if (!stopping) {
                 tau = ident.step(t, q, dq, done);
                 Violation v = monitor.checkState(q, dq);
+                // The rate over the period that actually elapsed (a late packet doubles a blend's step)
+                const double dtp = period.toSec() > 0.0 ? period.toSec() : RunConstants::dt;
                 if (v == Violation::None)
-                    v = monitor.checkTorque(Vec7(tau + g), tau, tauPrev, RunConstants::dt);
+                    v = monitor.checkTorque(Vec7(tau + g), tau, tauPrev, dtp);
                 if (v == Violation::None && !(q.allFinite() && dq.allFinite()))
                     v = Violation::NonFinite;
 #ifdef SE3PF_MOCK_FRANKA
