@@ -211,6 +211,19 @@ namespace se3pf {
                           "where the joints lag the lift (loops_7 and loops_8 of 2026-10-19).";
                 f.gains.kiEta = f.gains.Ki = f.gains.KiBeta = 0.0;
                 v.push_back(f);
+                // The PD with the wrist's rotor inertia only (2026-10-20): no friction feedforward, no integral
+                // action; the feedback alone against the robot's friction
+                ExperimentSpec m = f;
+                m.name = "loops-inertia";
+                m.title = "Two loops at constant speed: PD with the wrist inertia only";
+                m.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15) and the wrist's rotor inertia in "
+                            "the inverse dynamics, but no friction feedforward and no integral action: the paper's "
+                            "control law against the robot's friction with a corrected M only (CTRL-1, 2026-10-20).";
+                m.watch = "Pass criteria as 'loops'. Every joint must break its own static friction (0.5 to 1.2 N m) "
+                          "through the feedback: expect larger lags than with the feedforward, eta_dot well below "
+                          "nu_d and beta drifting; a stall or a Redundancy stop is possible.";
+                m.friction = FrictionFeedforward();
+                v.push_back(m);
             }
             {
                 ExperimentSpec e = base;
