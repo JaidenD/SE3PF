@@ -35,6 +35,7 @@ add_library(se3pf
     src/safety.cpp
     src/experiments.cpp
     src/preflight.cpp
+    src/identify.cpp
 )
 target_include_directories(se3pf PUBLIC include)
 target_link_libraries(se3pf PUBLIC Eigen3::Eigen PRIVATE se3pf_warnings)
@@ -70,6 +71,7 @@ if(SE3PF_BUILD_TESTS)
         tests/test_panda_example.cpp
         tests/test_safety.cpp
         tests/test_preflight.cpp
+        tests/test_identify.cpp
         tests/test_franka_convert.cpp
     )
     target_include_directories(tests PRIVATE apps/robot)  # franka_convert.hpp: no libfranka needed
@@ -89,7 +91,7 @@ if(SE3PF_BUILD_TESTS)
 
     # Software in the loop: runs robot_driver_mock (a separate process) for every experiment and with faults
     add_executable(tests_sil tests/rng_listener.cpp tests/sil/test_robot_driver.cpp)
-    target_include_directories(tests_sil PRIVATE tests apps/robot)
+    target_include_directories(tests_sil PRIVATE tests apps/robot mock)  # mock_arm.h: the expected inertia of the identification test
     target_link_libraries(tests_sil PRIVATE se3pf Catch2::Catch2WithMain se3pf_warnings)
     target_compile_definitions(tests_sil PRIVATE SE3PF_ROBOT_DRIVER_MOCK="$<TARGET_FILE:robot_driver_mock>")
     add_dependencies(tests_sil robot_driver_mock)

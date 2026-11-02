@@ -47,22 +47,26 @@ namespace se3pf {
     };
 
     // The lift q*(s) of Assumption 1 for the Panda: on the self-motion manifold over gamma(s), the configuration
-    // nearest the rest posture q_r. Computed on the uniform grid s_k = k L / n by continuation: node 0 from q_r,
+    // nearest the rest posture q_r in the norm |q - q_r|_W^2 = (q - q_r)^T W (q - q_r), W = diag(weights) > 0
+    // (the paper's lift: W = I). Computed on the uniform grid s_k = k L / n by continuation: node 0 from q_r,
     // every later node from the previous solution, by the projected Newton step
-    //     dq = J^+ e + (I - J^+ J)(q_r - q),   J = J_b(q),  J^+ = J^T (J J^T)^-1,
-    // until |e| < 1e-12 and |(I - J^+ J)(q - q_r)| < 1e-12, the Lagrange condition of min |q - q_r| subject to
-    // FK(q) = gamma(s): q - q_r lies in the range of J^T. Node derivatives q*' by fourth-order periodic central
-    // differences; q* and q*' are stored in a cubic Hermite spline.
+    //     dq = J^+ e + (I - J^+ J)(q_r - q),   J = J_b(q),  J^+ = W^-1 J^T (J W^-1 J^T)^-1,
+    // until |e| < 1e-12 and |(I - J^+ J)(q - q_r)| < 1e-12, the Lagrange condition of min |q - q_r|_W subject to
+    // FK(q) = gamma(s): W (q - q_r) lies in the range of J^T. Node derivatives q*' by fourth-order periodic central
+    // differences; q* and q*' are stored in a cubic Hermite spline. A weight above 1 on a joint keeps it nearer
+    // its rest value and moves the self-motion to the others: on the robot (CTRL-1, 2026-10-19) a weight on joint 7
+    // hands the flange's yaw from joint 7 to joint 1, which the paper's lift leaves almost still (0.28 rad of travel
+    // per loop against joint 7's 1.3), so still that its static friction made it stick-slip.
     // The lift copies what it needs, so the path may be destroyed after construction. Construction is offline:
     // it throws std::invalid_argument if gridIntervals < 4 (the fourth-order differences need two neighbours on
-    // each side), and std::runtime_error if Newton's method fails at a node, a joint leaves its range, or the
-    // branch does not close (|q*(L) - q*(0)| > 1e-6: the continuation ended on another self-motion, and
-    // Assumption 1 fails). Whether q* is a minimum and not a maximum is a separate check, minimumCheck below.
-    // eval is online: no allocation, no exceptions.
+    // each side) or a weight is not finite and positive, and std::runtime_error if Newton's method fails at a
+    // node, a joint leaves its range, or the branch does not close (|q*(L) - q*(0)| > 1e-6: the continuation
+    // ended on another self-motion, and Assumption 1 fails). Whether q* is a minimum and not a maximum is a
+    // separate check, minimumCheck below. eval is online: no allocation, no exceptions.
     class Lift {
         public:
             explicit Lift(const Path& path, const Vec7& restPosture = PandaArm::restPosture(),
-                          int gridIntervals = 2000);
+                          int gridIntervals = 2000, const Vec7& weights = Vec7::Ones());
 
             // q*(s) and, if dq is not null, q*'(s), by cubic Hermite interpolation of the node values; s is
             // wrapped into [0, L). A non-finite s gives NaN entries (the controller's allFinite checks catch them).
@@ -71,6 +75,7 @@ namespace se3pf {
             double length() const { return L_; }
             int gridIntervals() const { return n_; }
             const Vec7& restPosture() const { return qr_; }
+            const Vec7& weights() const { return w_; }  // the diagonal of W
             // q*(s_k) for k = 0, ..., n; node n is node 0 (the spline's convention)
             const std::vector<Vec7>& nodes() const { return nodes_; }
             const LiftDiagnostics& diagnostics() const { return diag_; }
@@ -79,12 +84,13 @@ namespace se3pf {
             double L_;
             int n_;
             Vec7 qr_;
+            Vec7 w_;
             std::vector<Vec7> nodes_;
             PeriodicHermite<Vec7> q_;
             LiftDiagnostics diag_;
     };
 
-    // Is q* a minimum of f(q) = |q - q_r|^2 on each self-motion, and not a maximum? At every node s_k, q+- are the
+    // Is q* a minimum of f(q) = |q - q_r|_W^2 on each self-motion, and not a maximum? At every node s_k, q+- are the
     // configurations with the pose FK(q*(s_k)) at x^T q = x^T q*(s_k) +- delta, x = kernelVector(J_b(q*(s_k))),
     // found by constrainedIK from q*(s_k). Returns the smallest second difference f(q+) - 2 f(q*) + f(q-) over the
     // nodes: positive for a minimum. (q* +- delta x itself would not do: f is quadratic, so its second difference

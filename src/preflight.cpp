@@ -58,7 +58,9 @@ namespace se3pf {
                 rep.tFail = t;
                 break;
             }
-            const ExperimentLogRow row = makeLogRow(t, 0, cycle.status, q, dq, cycle.qdd, cycle.tau, cycle.tauG);
+            const ExperimentLogRow row =
+                makeLogRow(t, 0, cycle.status, q, dq, cycle.qdd, cycle.tau, cycle.tauG, cycle.tauF,
+                           &setup.example().path());
             rep.peaks.add(row);
             if (log)
                 log->push_back(row);

@@ -23,7 +23,7 @@ them, and do not skip the preflight.
 | commanded torque rate | <= 600 N m/s (libfranka's rate limiter is on as well) |
 | translational speed of the flange | <= 0.5 m/s (0.2 m/s in the moving experiments, 0.1 m/s in `hold` and `self-motion`) |
 | transverse error \|xi\| | <= 0.04 (metric units, l = 0.1 m: 4 cm of position, or 0.4 rad = 23 deg of attitude) |
-| redundancy output \|beta\| | <= 0.05 rad |
+| redundancy output \|beta\| | <= 0.1 rad |
 | sigma_min(A) | >= 1e-3 |
 
 **The safety stop** (`SafetyStop`, `include/se3pf/experiments.hpp`): a damped hold at q_stop, the configuration where

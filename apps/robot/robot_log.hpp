@@ -6,10 +6,14 @@
 // Columns, one row per control cycle (joints numbered from 1 as on the robot):
 //   t, phase (0 following, 1 safety stop: damped hold), eta, eta_dot, ref (nu_d or eta_d), e_tan, xi1..xi5, xi_norm,
 //   beta, beta_dot, sigma_min, ramp, newton, q1..q7, dq1..dq7, tau1..tau7 (commanded torque, without G),
-//   tauG1..tauG7 (tau + G: the torque the joints deliver), qdd1..qdd7 (qdd*), compute_us, period_ms, success_rate
-//   (the last three are the driver's: time spent in the callback, libfranka's period, and the robot's
-//   control_command_success_rate; 0 in predictions).
+//   tauG1..tauG7 (tau + G: the torque the joints deliver), qdd1..qdd7 (qdd*), tauF1..tauF7 (the friction
+//   feedforward tau_f, part of tau; CTRL-1), tauJ1..tauJ7 (driver only: the measured link-side torque tau_J of the
+//   robot state, gravity included, to compare with tauG), int_eta, int_xi, int_beta (the integral terms in mu, |.|
+//   of the xi one; CTRL-1), compute_us, period_ms, success_rate (the last three are the driver's: time spent in the
+//   callback, libfranka's period, and the robot's control_command_success_rate; 0 in predictions, as tauJ),
+//   gx, gy, gz, grx, gry, grz (the desired pose gamma(eta): position, m, and rotation vector, rad; 2026-11-02).
 #include "se3pf/experiments.hpp"
+#include "se3pf/identify.hpp"
 
 #include <cstddef>
 #include <fstream>
@@ -22,10 +26,10 @@ namespace se3pf::robot {
     inline void writeLogHeader(std::ostream& os)
     {
         os << "t,phase,eta,eta_dot,ref,e_tan,xi1,xi2,xi3,xi4,xi5,xi_norm,beta,beta_dot,sigma_min,ramp,newton";
-        for (const char* name : {"q", "dq", "tau", "tauG", "qdd"})
+        for (const char* name : {"q", "dq", "tau", "tauG", "qdd", "tauF", "tauJ"})
             for (int i = 1; i <= 7; ++i)
                 os << ',' << name << i;
-        os << ",compute_us,period_ms,success_rate\n";
+        os << ",int_eta,int_xi,int_beta,compute_us,period_ms,success_rate,gx,gy,gz,grx,gry,grz\n";
     }
 
     inline void writeLogRow(std::ostream& os, const ExperimentLogRow& r)
@@ -35,10 +39,14 @@ namespace se3pf::robot {
             os << ',' << r.xi[i];
         os << ',' << r.xiNorm << ',' << r.beta << ',' << r.betaDot << ',' << r.sigmaMin << ',' << r.ramp << ','
            << r.newton;
-        for (const Vec7* v : {&r.q, &r.dq, &r.tau, &r.tauG, &r.qdd})
+        for (const Vec7* v : {&r.q, &r.dq, &r.tau, &r.tauG, &r.qdd, &r.tauF, &r.tauJ})
             for (int i = 0; i < 7; ++i)
                 os << ',' << (*v)[i];
-        os << ',' << r.computeUs << ',' << r.periodMs << ',' << r.successRate << '\n';
+        os << ',' << r.iEta << ',' << r.iXi << ',' << r.iBeta << ',' << r.computeUs << ',' << r.periodMs << ','
+           << r.successRate;
+        for (int i = 0; i < 6; ++i)
+            os << ',' << r.gamma[i];
+        os << '\n';
     }
 
     // Writes rows [0, count) to path; false if the file cannot be written.
@@ -51,6 +59,32 @@ namespace se3pf::robot {
         writeLogHeader(f);
         for (std::size_t k = 0; k < count && k < rows.size(); ++k)
             writeLogRow(f, rows[k]);
+        return static_cast<bool>(f);
+    }
+
+    // The identification run's log (se3pf/identify.hpp): t, phase (0 hold, 1 ramp, 2 step, 3 safety stop), joint
+    // (1-based active joint, 0 none), dir, pulse (0 ramp, 1 and 2 steps, -1 none), pulse_tau, tau1..7 (commanded,
+    // without G), q1..7, dq1..7, tauJ1..7 (measured link-side torque), G1..7 (the model's gravity), compute_us,
+    // period_ms.
+    inline bool writeIdentifyCsv(const std::string& path, const std::vector<IdentifyLogRow>& rows, std::size_t count)
+    {
+        std::ofstream f(path);
+        if (!f)
+            return false;
+        f.precision(10);
+        f << "t,phase,joint,dir,pulse,pulse_tau";
+        for (const char* name : {"tau", "q", "dq", "tauJ", "G"})
+            for (int i = 1; i <= 7; ++i)
+                f << ',' << name << i;
+        f << ",compute_us,period_ms\n";
+        for (std::size_t k = 0; k < count && k < rows.size(); ++k) {
+            const IdentifyLogRow& r = rows[k];
+            f << r.t << ',' << r.phase << ',' << r.joint << ',' << r.direction << ',' << r.pulse << ',' << r.pulseTorque;
+            for (const Vec7* v : {&r.tau, &r.q, &r.dq, &r.tauJ, &r.G})
+                for (int i = 0; i < 7; ++i)
+                    f << ',' << (*v)[i];
+            f << ',' << r.computeUs << ',' << r.periodMs << '\n';
+        }
         return static_cast<bool>(f);
     }
 

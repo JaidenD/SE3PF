@@ -1,7 +1,7 @@
 // Tests of the hardware experiments and their preflight (se3pf/experiments.hpp, se3pf/preflight.hpp;
 // docs/HARDWARE.md): the catalog, the speed profile, the setup (start configuration, controller), the shared control
-// cycle ExperimentLoop, and the preflight: every experiment passes, kinematic only and with a dynamics model, and a
-// bad experiment fails with the right reason.
+// cycle ExperimentLoop, the friction feedforward (CTRL-1), and the preflight: every experiment passes, kinematic
+// only and with a dynamics model, and a bad experiment fails with the right reason.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "se3pf/experiments.hpp"
@@ -11,6 +11,7 @@
 #include "test_helpers.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -60,6 +61,13 @@ namespace {
             double m_;
     };
 
+    // The example an experiment runs on: the test program's coning-circle example, or one per other path
+    const PandaExample& exampleFor(const ExperimentSpec& e)
+    {
+        static PandaExamples others;
+        return e.path == PathKind::Coning ? pandaExample() : others(e);
+    }
+
     const ExperimentSpec& spec(const char* name)
     {
         const ExperimentSpec* e = findExperiment(name);
@@ -92,9 +100,11 @@ namespace {
 TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is valid and never loosens a margin")
 {
     const std::vector<ExperimentSpec>& all = experiments();
-    REQUIRE(all.size() == 5);
-    const char* order[] = {"hold", "loops", "recover", "paper", "self-motion"};
-    for (int i = 0; i < 5; ++i) {
+    REQUIRE(all.size() == 19);
+    const char* order[] = {"hold", "loops", "loops-integral", "loops-friction", "loops-inertia", "loops-pid", "loops-pid-hi", "recover", "paper", "self-motion",
+                           "orbit-velocity", "orbit-position", "dome-velocity", "dome-position", "dome-velocity-lo",
+                           "orbit-selfmotion-hold", "orbit-selfmotion-moving", "rail-damper", "rail-spring"};
+    for (int i = 0; i < 19; ++i) {
         CAPTURE(i);
         CHECK(all[i].name == order[i]);
         CHECK(findExperiment(order[i]) == &all[i]);
@@ -111,17 +121,95 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK_FALSE(SafetyMonitor(e.limits).clamped());
         // Starts inside the tube and redundancy margins, with room to spare
         CHECK(e.xi0.norm() <= 0.8 * B::xi);
-        CHECK(std::abs(e.beta0) <= 0.04);
+        // (the self-motion demos on the orbit start at 0.5 rad: they need a beta bound above that)
+        const bool selfMotionDemo = e.name.find("selfmotion") != std::string::npos;
+        const bool railRun = e.path == PathKind::Rail;  // pushed by hand: no integrals, tight limits
+        CHECK(std::abs(e.beta0) <= (selfMotionDemo ? 0.5 : 0.04));
         // The mu ramp (Rules for the 1 kHz loop: hardware only, T = 1-2 s)
         CHECK(e.rampTime >= 1.0);
         CHECK(e.rampTime <= 2.0);
-        // The paper's poles at -4
-        CHECK(e.gains.Kp == 16.0);
-        CHECK(e.gains.Kd == 8.0);
-        CHECK(e.gains.KpBeta == 16.0);
-        CHECK(e.gains.KdBeta == 8.0);
-        if (e.mode == TangentialReference::Mode::Velocity) {
-            CHECK(e.gains.kt == 5.0);
+        // The paper's poles at -4 and k_t = 5, except loops: poles at -6 and k_t = 10 (CTRL-1, 2026-10-19)
+        const bool loopsLike = e.name == "loops" || e.name == "loops-integral" || e.name == "loops-friction"
+                               || e.name == "loops-inertia" || e.name == "loops-pid"
+                               || e.name == "loops-pid-hi";
+        // The paper's paths (2026-11-02): the controller of loops-pid on the orbit and the dome
+        const bool pathRun = e.path != PathKind::Coning;
+        CHECK(pathRun == (e.name.rfind("orbit-", 0) == 0 || e.name.rfind("dome-", 0) == 0
+                          || e.name.rfind("rail-", 0) == 0));
+        const bool paperGains = e.name == "dome-velocity-lo";  // the paper's gains on the dome (2026-11-02)
+        const double lambda = ((loopsLike || pathRun) && !paperGains) ? 6.0 : 4.0;
+        const bool stiffXi = selfMotionDemo || railRun;  // transverse poles at -8, beta at -4
+        CHECK(e.gains.Kp == (stiffXi ? 64.0 : lambda * lambda));
+        CHECK(e.gains.Kd == (stiffXi ? 16.0 : 2.0 * lambda));
+        CHECK(e.gains.KpBeta == (stiffXi ? 16.0 : lambda * lambda));
+        CHECK(e.gains.KdBeta == (stiffXi ? 8.0 : 2.0 * lambda));
+        // Integral action only in loops (CTRL-1)
+        if (e.name == "loops-friction" || e.name == "loops-inertia") {
+            CHECK(e.gains.kiEta == 0.0);
+            CHECK(e.gains.Ki == 0.0);
+            CHECK(e.gains.KiBeta == 0.0);
+            CHECK(e.friction.active() == (e.name == "loops-friction"));
+            // Both carry the inertia measured by 'identify' on 2026-10-20; loops-friction the measured friction too
+            CHECK(maxDiff(e.rotorInertia, (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished()) == 0.0);
+            if (e.name == "loops-friction") {
+                CHECK(maxDiff(e.friction.coulomb, (Vec7() << 0.65, 0.40, 0.20, 0.30, 0.60, 0.30, 0.35).finished()) == 0.0);
+                CHECK(e.friction.viscous.isZero());
+            }
+        } else if (railRun) {
+            CHECK(e.gains.kiEta == 0.0);
+            CHECK(e.gains.Ki == 0.0);
+            CHECK(e.gains.KiBeta == 0.0);
+            CHECK(e.limits.xi == 0.03);
+            CHECK(e.limits.flangeSpeed == 0.15);
+            CHECK(e.limits.beta == 0.1);
+            CHECK_FALSE(e.friction.active());
+            if (e.mode == TangentialReference::Mode::Velocity) {
+                CHECK(e.speed.nuMax == 0.0);  // nothing drives eta: mu_eta = -k_t eta_dot
+                CHECK(e.gains.kt == 15.0);
+            } else {
+                CHECK_FALSE(e.stations.active());  // eta_d = s0: a spring back to the start
+                CHECK(e.gains.kpEta == 16.0);
+                CHECK(e.gains.kdEta == 8.0);
+            }
+        } else if (pathRun) {
+            CHECK(e.gains.kiEta == (paperGains ? 6.0 : 25.0));
+            CHECK(e.gains.Ki == (selfMotionDemo ? 64.0 : paperGains ? 16.0 : 36.0));
+            CHECK(e.gains.KiBeta == ((selfMotionDemo || paperGains) ? 16.0 : 36.0));
+            if (selfMotionDemo)
+                CHECK(e.gains.integralMaxBeta == 1.5);
+            CHECK(e.gains.kpEta == (paperGains ? 16.0 : 36.0));
+            CHECK(e.gains.kdEta == (paperGains ? 8.0 : 12.0));
+            CHECK_FALSE(e.friction.active());
+            CHECK(maxDiff(e.rotorInertia, (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished()) == 0.0);
+            CHECK(e.stations.active() == (e.mode == TangentialReference::Mode::Position && !selfMotionDemo));
+            if (e.stations.active()) {
+                CHECK(e.stations.count == 6);
+                CHECK(e.stations.peakSpeed() <= 0.0601);
+                CHECK(e.stations.end() <= e.duration);
+            }
+        } else if (e.name == "loops-pid-hi") {  // stiffer tangential loop (loops_pid_1, 2026-11-02)
+            CHECK(e.gains.kiEta == 100.0);
+            CHECK(e.gains.integralMaxEta == 2.0);
+            CHECK(e.gains.Ki == 36.0);
+            CHECK(e.gains.KiBeta == 36.0);
+        } else if (loopsLike) {
+            if (e.name == "loops-pid" || e.name == "loops-pid-hi") {  // the integral action of loops, the measured inertia, no friction model
+                CHECK_FALSE(e.friction.active());
+                CHECK(maxDiff(e.rotorInertia, (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished()) == 0.0);
+            }
+            CHECK(e.gains.kiEta == 25.0);
+            CHECK(e.gains.Ki == 36.0);
+            CHECK(e.gains.KiBeta == 36.0);
+            CHECK(e.gains.integralMaxEta == 1.0);
+            CHECK(e.gains.integralMaxXi == 1.0);
+            CHECK(e.gains.integralMaxBeta == 3.0);
+        } else {
+            CHECK(e.gains.kiEta == 0.0);
+            CHECK(e.gains.Ki == 0.0);
+            CHECK(e.gains.KiBeta == 0.0);
+        }
+        if (e.mode == TangentialReference::Mode::Velocity && !railRun) {
+            CHECK(e.gains.kt == (e.name == "loops-pid-hi" ? 30.0 : paperGains ? 5.0 : (loopsLike || pathRun) ? 15.0 : 5.0));
             CHECK(e.speed.end() <= e.duration);
             CHECK(e.speed.rampUp >= 2.0);  // smooth start
             CHECK(e.speed.rampDown >= 4.0);  // ends at rest
@@ -152,6 +240,93 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
     CHECK(spec("self-motion").mode == TangentialReference::Mode::Position);
     CHECK(spec("self-motion").beta0 == 0.04);
     CHECK(spec("self-motion").duration == 6.0);
+
+    // The friction feedforward (CTRL-1): on in loops at the Gaz et al. 2019 levels (joint 6 raised), off everywhere else (the runs of
+    // 2026-10-19 before it)
+    for (const ExperimentSpec& e : all) {
+        CAPTURE(e.name);
+        const bool frictionOn = e.name == "loops" || e.name == "loops-friction";
+        CHECK(e.friction.active() == frictionOn);
+        CHECK(e.friction.velocityScale == (frictionOn ? 0.005 : 0.01));
+    }
+    Vec7 expected = FrictionFeedforward::gaz2019().coulomb;
+    expected[0] = 0.70;  // joint 1: stuck under 0.58 N m (loops_7) and 0.80 N m (loops_6)
+    expected[4] = 0.60;  // the wrist: below each joint's breakaway measured on 2026-10-19 (loops_2 to loops_5)
+    expected[5] = 0.35;
+    expected[6] = 0.50;
+    CHECK(maxDiff(spec("loops").friction.coulomb, expected) == 0.0);
+    CHECK(maxDiff(spec("loops").friction.viscous, (Vec7() << 0, 0, 0, 0, 0.5, 0.5, 0.5).finished()) == 0.0);
+    CHECK(spec("loops").friction.coulomb.maxCoeff() < 0.75);  // joint 1: 0.70 N m, the largest
+    CHECK(spec("loops").friction.velocityScale == 0.005);
+    // The rotor inertia: 0.3 kg m^2 on the wrist of loops, none elsewhere
+    for (const ExperimentSpec& e : all) {
+        CAPTURE(e.name);
+        CHECK(e.rotorInertia.isZero() == (e.name != "loops" && e.name != "loops-friction" && e.name != "loops-inertia"
+                                         && e.name != "loops-pid" && e.name != "loops-pid-hi"
+                                         && e.path == PathKind::Coning));
+    }
+    CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.5, 0.5, 0.5).finished()) == 0.0);
+}
+
+TEST_CASE("experiments on the paper's paths: the L of the catalog is the example's, two loops or one in six stations")
+{
+    PandaExamples examples;
+    for (const char* name : {"orbit-velocity", "orbit-position", "dome-velocity", "dome-position", "dome-velocity-lo"}) {
+        CAPTURE(name);
+        const ExperimentSpec& e = spec(name);
+        const PandaExample& ex = examples(e);
+        REQUIRE(ex.pathKind() == e.path);
+        const double L = ex.tube().length();
+        if (e.mode == TangentialReference::Mode::Velocity)
+            CHECK(std::abs(e.speed.distance() - 2.0 * L) < 1e-3);
+        else
+            CHECK(std::abs(e.stations.count * e.stations.step - L) < 1e-3);
+        const ExperimentSetup setup(ex, e);  // a start exists
+        CHECK(setup.start().allFinite());
+    }
+    // An example on another path is refused
+    CHECK_THROWS_AS(ExperimentSetup(examples.get(PathKind::Coning), spec("orbit-velocity")), std::invalid_argument);
+}
+
+TEST_CASE("StationSchedule: waits, moves by step with a smooth profile, stops; continuous rate and acceleration")
+{
+    StationSchedule st;
+    double e = 1.0, de = 1.0, dde = 1.0;
+    st.eval(5.0, e, de, dde);  // no stations: zero
+    CHECK(e == 0.0);
+    CHECK(de == 0.0);
+    st.count = 3;
+    st.step = 0.2;
+    st.moveTime = 4.0;
+    st.dwell = 2.0;
+    st.firstDwell = 1.0;
+    CHECK(st.end() == 19.0);
+    CHECK(std::abs(st.peakSpeed() - 1.875 * 0.2 / 4.0) < 1e-15);
+    st.eval(0.5, e, de, dde);
+    CHECK(e == 0.0);
+    st.eval(3.0, e, de, dde);  // half way through the first move
+    CHECK(std::abs(e - 0.1) < 1e-15);
+    CHECK(std::abs(de - st.peakSpeed()) < 1e-12);
+    st.eval(6.0, e, de, dde);  // dwelling at the first station
+    CHECK(std::abs(e - 0.2) < 1e-15);
+    CHECK(de == 0.0);
+    st.eval(100.0, e, de, dde);  // after the last
+    CHECK(std::abs(e - 0.6) < 1e-15);
+    // de and dde are the derivatives of e, and continuous
+    const double h = 1e-6;
+    double prevDe = 0.0, prevDde = 0.0;
+    for (double t = 0.0; t < 20.0; t += 0.01) {
+        double e1, d1, a1, e2, d2, a2;
+        st.eval(t - h, e1, d1, a1);
+        st.eval(t + h, e2, d2, a2);
+        st.eval(t, e, de, dde);
+        CHECK(std::abs((e2 - e1) / (2 * h) - de) < 1e-6);
+        CHECK(std::abs((d2 - d1) / (2 * h) - dde) < 1e-4);
+        CHECK(std::abs(de - prevDe) < 0.01);
+        CHECK(std::abs(dde - prevDde) < 0.01);
+        prevDe = de;
+        prevDde = dde;
+    }
 }
 
 TEST_CASE("SpeedProfile: values, an exact time derivative, continuity at the joints, zero outside")
@@ -212,6 +387,328 @@ TEST_CASE("SpeedProfile: values, an exact time derivative, continuity at the joi
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// The friction feedforward (CTRL-1)
+
+TEST_CASE("FrictionFeedforward: the law, its limits, Gaz et al. 2019 and scaling")
+{
+    FrictionFeedforward f;
+    CHECK_FALSE(f.active());
+    CHECK(f.torque(Vec7::Constant(1.0)).isZero());  // off: nothing, whatever v
+    f.coulomb = (Vec7() << 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7).finished();
+    f.viscous = (Vec7() << 0.0, 1.0, 0.0, 2.0, 0.0, 0.0, 0.5).finished();
+    f.velocityScale = 0.01;
+    CHECK(f.active());
+    // At rest nothing; odd in v; the sign of the motion
+    CHECK(f.torque(Vec7::Zero()).isZero());
+    const Vec7 v = (Vec7() << 0.05, -0.05, 0.1, -0.2, 1.0, -1.0, 0.03).finished();
+    CHECK(maxDiff(f.torque(v), Vec7(-f.torque(Vec7(-v)))) < 1e-15);
+    for (int i = 0; i < 7; ++i) {
+        CAPTURE(i);
+        CHECK_THAT(f.torque(v)[i], WithinAbs(f.coulomb[i] * std::tanh(v[i] / 0.01) + f.viscous[i] * v[i], 1e-15));
+        CHECK(f.torque(v)[i] * v[i] > 0.0);
+    }
+    // Saturated far above v0: Fc sign(v) + Fv v (tanh(50) = 1 to double precision)
+    CHECK(maxDiff(f.torque(Vec7::Constant(0.5)), Vec7(f.coulomb + 0.5 * f.viscous)) < 1e-15);
+    CHECK(maxDiff(f.torque(Vec7::Constant(-0.5)), Vec7(-f.coulomb - 0.5 * f.viscous)) < 1e-15);
+    // At v = v0 76 % of Fc, at 3 v0 99.5 %: the transition is +-3 v0 wide
+    CHECK_THAT(f.torque(Vec7::Constant(0.01))[0], WithinAbs(0.1 * std::tanh(1.0), 1e-15));
+    CHECK(std::tanh(1.0) > 0.76);
+    CHECK(std::tanh(3.0) > 0.995);
+    // Bounded by Fc + Fv |v| for every finite v; a non-finite v gives a non-finite torque on that joint only
+    // (ExperimentLoop turns it into NonFinite; 0 * inf is NaN, so an infinite v never saturates quietly)
+    for (double x : {1e-6, 1e-3, 0.02, 0.3, 7.0, 1e6}) {
+        const Vec7 vx = Vec7::Constant(x);
+        CHECK((f.torque(vx).array() <= (f.coulomb + x * f.viscous).array() + 1e-15).all());
+        CHECK(f.torque(vx).allFinite());
+    }
+    Vec7 bad = v;
+    bad[2] = std::nan("");
+    bad[0] = std::numeric_limits<double>::infinity();
+    CHECK(std::isnan(f.torque(bad)[2]));
+    CHECK_FALSE(std::isfinite(f.torque(bad)[0]));
+    CHECK(std::isfinite(f.torque(bad)[1]));
+    CHECK(std::isfinite(f.torque(bad)[6]));
+    // Scaling: Fc and Fv, not v0; 0 turns it off
+    const FrictionFeedforward h = f.scaled(0.5);
+    CHECK(maxDiff(h.coulomb, Vec7(0.5 * f.coulomb)) == 0.0);
+    CHECK(maxDiff(h.viscous, Vec7(0.5 * f.viscous)) == 0.0);
+    CHECK(h.velocityScale == 0.01);
+    CHECK_FALSE(f.scaled(0.0).active());
+    CHECK(maxDiff(h.torque(v), Vec7(0.5 * f.torque(v))) < 1e-15);
+
+    // Gaz et al. 2019: Fc = phi1 / 2, the mean of the two asymptotes of their sigmoid (recomputed here from the
+    // published phi1, phi2, phi3), no viscous term, v0 = 0.01 rad/s
+    const FrictionFeedforward g = FrictionFeedforward::gaz2019();
+    CHECK(g.active());
+    CHECK(g.viscous.isZero());
+    CHECK(g.velocityScale == 0.01);
+    const double phi1[7] = {0.54615, 0.87224, 0.64068, 1.2794, 0.83904, 0.30301, 0.56489};
+    const double phi2[7] = {5.1181, 9.0657, 10.136, 5.5903, 8.3469, 17.133, 10.336};
+    const double phi3[7] = {0.039533, 0.025882, -0.04607, 0.036194, 0.026226, -0.021047, 0.0035526};
+    const double expected[7] = {0.2731, 0.4361, 0.3203, 0.6397, 0.4195, 0.1515, 0.2824};
+    for (int i = 0; i < 7; ++i) {
+        CAPTURE(i);
+        const double sigma = 1.0 / (1.0 + std::exp(-phi2[i] * phi3[i]));
+        const double offset = phi1[i] * sigma;  // the sigmoid's value subtracted at qd = 0
+        const double plus = phi1[i] - offset;    // qd -> +inf
+        const double minus = offset;             // |tau_f| as qd -> -inf
+        CHECK_THAT(g.coulomb[i], WithinAbs(0.5 * (plus + minus), 1e-12));
+        CHECK_THAT(g.coulomb[i], WithinAbs(expected[i], 1e-4));
+        CHECK(std::abs(plus - minus) <= 0.5 * g.coulomb[i]);  // the asymmetry dropped: at most +-25 %
+        // The sigmoid's slope at rest is its transition width, not a viscous coefficient: at 0.05 rad/s it gives
+        // only 12 to 42 % of Fc (the stalled joints need the full level from the start)
+        const double at005 = phi1[i] / (1.0 + std::exp(-phi2[i] * (0.05 + phi3[i]))) - offset;
+        CHECK(at005 < 0.45 * g.coulomb[i]);
+    }
+}
+
+TEST_CASE("ExperimentSetup refuses an invalid friction feedforward")
+{
+    const PandaExample& ex = pandaExample();
+    ExperimentSpec bad = spec("loops");
+    bad.friction.coulomb[4] = -0.1;
+    CHECK_THROWS_AS(ExperimentSetup(ex, bad), std::invalid_argument);
+    bad = spec("loops");
+    bad.friction.coulomb[0] = std::nan("");
+    CHECK_THROWS_AS(ExperimentSetup(ex, bad), std::invalid_argument);
+    bad = spec("loops");
+    bad.friction.viscous[6] = -1.0;
+    CHECK_THROWS_AS(ExperimentSetup(ex, bad), std::invalid_argument);
+    bad = spec("loops");
+    bad.friction.viscous[1] = std::numeric_limits<double>::infinity();
+    CHECK_THROWS_AS(ExperimentSetup(ex, bad), std::invalid_argument);
+    for (double v0 : {0.0, -0.01, std::nan(""), std::numeric_limits<double>::infinity()}) {
+        CAPTURE(v0);
+        bad = spec("loops");
+        bad.friction.velocityScale = v0;
+        CHECK_THROWS_AS(ExperimentSetup(ex, bad), std::invalid_argument);
+    }
+    // Off (every other experiment) and a wide transition are valid
+    ExperimentSpec ok = spec("paper");
+    ok.friction.velocityScale = 10.0;
+    CHECK_NOTHROW(ExperimentSetup(ex, ok));
+}
+
+TEST_CASE("ExperimentLoop: tau_f follows the reference velocity along the lift and counts in the torque checks")
+{
+    const PandaExample& ex = pandaExample();
+    const ExperimentSetup s(ex, spec("loops"));
+    const FrictionFeedforward& f = s.spec().friction;
+    REQUIRE(f.active());
+    ModelTerms m;
+    m.M = 2.0 * Mat<7, 7>::Identity();
+    m.c = Vec7::Constant(0.1);
+    m.G = Vec7::Constant(1.0);  // small: the artificial state below (at rest, 0.05 behind nu_d) commands a few N m
+
+    // referenceSpeed: the profile's nu_d for a velocity reference, 0 for a position reference
+    double nu = 0.0, dnu = 0.0;
+    spec("loops").speed.eval(10.0, nu, dnu);
+    CHECK(nu == 0.05);
+    CHECK(s.referenceSpeed(10.0) == nu);
+    CHECK(s.referenceSpeed(0.0) == 0.0);
+    CHECK(s.referenceSpeed(-1.0) == 0.0);
+    CHECK(s.referenceSpeed(100.0) == 0.0);
+    spec("loops").speed.eval(2.0, nu, dnu);
+    CHECK(s.referenceSpeed(2.0) == nu);
+    CHECK(ExperimentSetup(ex, spec("hold")).referenceSpeed(3.0) == 0.0);
+    CHECK(ExperimentSetup(ex, spec("self-motion")).referenceSpeed(3.0) == 0.0);
+
+    // At t = 0 the profile is at rest: no feedforward, and the first torque is c alone (the mu ramp zeroes qdd*)
+    {
+        ExperimentLoop loop(s, s.monitor());
+        ExperimentLoop::Cycle c;
+        loop.follow(0.0, s.start(), Vec7::Zero(), &m, c);
+        CHECK(c.violation == Violation::None);
+        CHECK(c.tauF.isZero());
+        CHECK(maxDiff(c.tau, m.c) < 1e-12);
+    }
+    // Cruising (nu_d = 0.05 at t = 10 s) from rest on the lift at s = 0.12: v = q*'(0.12) nu_d, tau_f = Fc tanh(v
+    // / v0) with the sign of q*', and tau = M qdd* + c + tau_f
+    Vec7 qs = Vec7::Zero(), dqs = Vec7::Zero();
+    ex.lift().eval(0.12, qs, &dqs);
+    const Vec7 v = dqs * 0.05;
+    {
+        ExperimentLoop loop(s, s.monitor());
+        ExperimentLoop::Cycle c;
+        // A fresh loop compares its first torque with zero (the arm rests under gravity compensation before the
+        // loop); the torque of this artificial state (at rest, 0.05 behind nu_d) exceeds 0.6 N m, so warm up with
+        // one cycle and check the second
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);
+        CHECK((c.violation == Violation::None || c.violation == Violation::TorqueRate));
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);
+        REQUIRE(c.violation == Violation::None);
+        CHECK_THAT(c.status.eta, WithinAbs(0.12, 1e-9));
+        CHECK(maxDiff(c.tauF, f.torque(v)) < 1e-12);
+        CHECK(c.tauF.cwiseAbs().maxCoeff() > 0.05);  // felt
+        for (int i = 0; i < 7; ++i) {
+            CAPTURE(i);
+            CHECK(c.tauF[i] * dqs[i] >= 0.0);
+            CHECK(std::abs(c.tauF[i]) <= f.coulomb[i] + f.viscous[i] * std::abs(v[i]) + 1e-15);
+        }
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + s.spec().rotorInertia.cwiseProduct(c.qdd) + m.c + c.tauF)) < 1e-12);
+        CHECK(maxDiff(c.tauG, Vec7(c.tau + m.G)) < 1e-12);
+        // Kinematic only (no model): no torque, but tau_f is still reported (the preflight's log)
+        ExperimentLoop kinematic(s, s.monitor());
+        kinematic.follow(10.0, qs, Vec7::Zero(), nullptr, c);
+        CHECK(c.violation == Violation::None);
+        CHECK(c.tau.isZero());
+        CHECK(c.tauG.isZero());
+        CHECK(maxDiff(c.tauF, f.torque(v)) < 1e-12);
+    }
+    // The rotor inertia: tau = (M + diag(Jr)) qdd* + c + tau_f; the preflight's motion is unchanged
+    {
+        ExperimentSpec e = spec("loops");
+        e.rotorInertia = (Vec7() << 0.05, 0.0, 0.0, 0.0, 0.05, 0.1, 0.1).finished();
+        const ExperimentSetup es(ex, e);
+        ExperimentLoop loop(es, es.monitor());
+        ExperimentLoop::Cycle c;
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);
+        REQUIRE(c.violation == Violation::None);
+        CHECK(c.qdd.cwiseAbs().maxCoeff() > 1e-3);
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + e.rotorInertia.cwiseProduct(c.qdd) + m.c + c.tauF)) < 1e-12);
+        ExperimentSpec plain = spec("loops");
+        plain.rotorInertia.setZero();
+        const ExperimentSetup ps(ex, plain);
+        ExperimentLoop loop2(ps, ps.monitor());
+        ExperimentLoop::Cycle c2;
+        loop2.follow(10.0, qs, Vec7::Zero(), &m, c2);
+        loop2.follow(10.0, qs, Vec7::Zero(), &m, c2);
+        CHECK(maxDiff(c2.qdd, c.qdd) == 0.0);  // the same qdd*: only the torque differs
+        CHECK(maxDiff(c2.tau, Vec7(c.tau - e.rotorInertia.cwiseProduct(c.qdd))) < 1e-12);
+        // Invalid values are refused
+        e.rotorInertia[4] = -0.1;
+        CHECK_THROWS_AS(ExperimentSetup(ex, e), std::invalid_argument);
+        e.rotorInertia[4] = std::nan("");
+        CHECK_THROWS_AS(ExperimentSetup(ex, e), std::invalid_argument);
+    }
+    // Off (the other experiments): tau_f = 0 and tau = M qdd* + c, as before CTRL-1
+    {
+        const ExperimentSetup p(ex, spec("paper"));
+        ExperimentLoop loop(p, p.monitor());
+        ExperimentLoop::Cycle c;
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);  // warm-up (the rate check against zero), as above
+        loop.follow(10.0, qs, Vec7::Zero(), &m, c);
+        REQUIRE(c.violation == Violation::None);
+        CHECK(c.tauF.isZero());
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + m.c)) < 1e-12);
+    }
+    // A position reference holds a point: v = 0 and tau_f = 0 however large the parameters
+    {
+        ExperimentSpec h = spec("hold");
+        h.friction = FrictionFeedforward::gaz2019();
+        const ExperimentSetup hs(ex, h);
+        ExperimentLoop loop(hs, hs.monitor());
+        ExperimentLoop::Cycle c;
+        loop.follow(3.0, hs.start(), Vec7::Constant(0.01), &m, c);
+        CHECK(c.violation == Violation::None);
+        CHECK(c.tauF.isZero());
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + m.c)) < 1e-12);
+    }
+    // tau_f counts in the torque check: 8 N m of Fc on joint 6 exceeds 60 % of its 12 N m once the lift moves it
+    ModelTerms light;
+    light.M = 2.0 * Mat<7, 7>::Identity();
+    {
+        ExperimentSpec e = spec("loops");
+        e.friction.coulomb[5] = 8.0;
+        e.friction.velocityScale = 1e-6;  // saturated at any speed
+        REQUIRE(dqs[5] != 0.0);
+        const ExperimentSetup es(ex, e);
+        ExperimentLoop loop(es, es.monitor());
+        ExperimentLoop::Cycle c;
+        loop.follow(10.0, qs, Vec7::Zero(), &light, c);
+        CHECK(c.violation == Violation::Torque);
+        CHECK_THAT(std::abs(c.tauF[5]), WithinAbs(8.0 + e.friction.viscous[5] * std::abs(v[5]), 1e-9));
+        CHECK(maxDiff(c.tau, Vec7(2.0 * c.qdd + e.rotorInertia.cwiseProduct(c.qdd) + c.tauF)) < 1e-12);
+        CHECK(std::abs(c.tau[5]) > 0.6 * 12.0);  // beyond the 60 % margin of joint 6
+    }
+    // ... and in the torque-rate check: a profile that starts at nu_d at t = 0 with Fc = 1 N m makes the first
+    // command jump from 0 to 1 N m: 1000 N m/s. The catalog's ramped profile starts at nu_d = 0, so its tau_f does.
+    {
+        ExperimentSpec e = spec("loops");
+        e.speed = {0.05, 0.0, 34.8, 0.0};
+        e.friction.coulomb = Vec7::Constant(1.0);
+        e.friction.velocityScale = 1e-6;
+        const ExperimentSetup es(ex, e);
+        ExperimentLoop loop(es, es.monitor());
+        ExperimentLoop::Cycle c;
+        loop.follow(0.0, es.start(), Vec7::Zero(), &light, c);
+        CHECK(c.violation == Violation::TorqueRate);
+        CHECK(c.tauF.cwiseAbs().maxCoeff() > 0.999);
+        ExperimentSpec ramped = e;
+        ramped.speed = spec("loops").speed;
+        const ExperimentSetup rs(ex, ramped);
+        ExperimentLoop loop2(rs, rs.monitor());
+        loop2.follow(0.0, rs.start(), Vec7::Zero(), &light, c);
+        CHECK(c.violation == Violation::None);
+        CHECK(c.tauF.isZero());
+    }
+}
+
+TEST_CASE("preflight with the friction feedforward: loops passes with a model, the log and the peaks report tau_f, "
+          "the motion is unchanged",
+          SLOW_IN_DEBUG)
+{
+    const PandaExample& ex = pandaExample();
+    const FakeDynamics dyn;
+    const ExperimentSetup s(ex, spec("loops"));
+    const FrictionFeedforward& f = s.spec().friction;
+    std::vector<ExperimentLogRow> log;
+    const PreflightReport r = preflight(s, &dyn, s.monitor(), &log);
+    INFO(r.summary());
+    CHECK(r.ok);
+    checkWithinLimits(r);
+    // The peak: at least the largest Fc (joint 4, 0.64 N m), at most Fc + Fv |v| with the lift's speeds below
+    // 0.25 rad/s at nu_d (joint 5: 0.60 + 0.5 |v|); the summary names it
+    CHECK(r.peaks.maxTauF >= f.coulomb.maxCoeff() - 1e-6);  // tanh saturates
+    CHECK(r.peaks.maxTauF <= (f.coulomb + 0.25 * f.viscous).maxCoeff());
+    char peak[64];
+    std::snprintf(peak, sizeof(peak), "tau_f <= %.2f N m (joint %d)", r.peaks.maxTauF, r.peaks.maxTauFJoint + 1);
+    CHECK(r.summary().find(peak) != std::string::npos);
+    // Smooth: the torque rate stays far below the 600 N m/s margin (the sign changes go through tanh)
+    CAPTURE(r.peaks.maxTauRate);
+    CHECK(r.peaks.maxTauRate < 20.0);
+    // Every row: tau_f is the law at q*'(eta) nu_d(t), zero while the profile is at rest, and tau includes it
+    REQUIRE(log.size() > 35000);
+    CHECK(log.front().tauF.isZero());
+    int felt = 0;
+    for (std::size_t k = 0; k < log.size(); k += 97) {
+        const ExperimentLogRow& row = log[k];
+        Vec7 qs = Vec7::Zero(), dqs = Vec7::Zero();
+        ex.lift().eval(row.eta, qs, &dqs);
+        const Vec7 expected = f.torque(Vec7(dqs * s.referenceSpeed(row.t)));
+        CHECK(maxDiff(row.tauF, expected) < 1e-12);
+        CHECK(maxDiff(row.tau, Vec7(dyn.mass(row.q) * row.qdd + s.spec().rotorInertia.cwiseProduct(row.qdd)
+                                    + dyn.coriolis(row.q, row.dq) + row.tauF))
+              < 1e-12);
+        if (row.t > 4.0 && row.t < 30.8 && row.tauF.cwiseAbs().maxCoeff() > 0.1)
+            ++felt;
+        if (row.t >= 34.8)
+            CHECK(row.tauF.isZero());
+    }
+    CHECK(felt > 200);
+    // The feedforward does not change the predicted motion (the preflight integrates qdd*): without it the same
+    // q, qdd and the same torque less tau_f
+    ExperimentSpec offSpec = spec("loops");
+    offSpec.friction = FrictionFeedforward();
+    const ExperimentSetup off(ex, offSpec);
+    std::vector<ExperimentLogRow> logOff;
+    const PreflightReport ro = preflight(off, &dyn, off.monitor(), &logOff);
+    REQUIRE(ro.ok);
+    REQUIRE(logOff.size() == log.size());
+    CHECK(ro.peaks.maxTauF == 0.0);
+    CHECK(ro.summary().find("tau_f <= 0.00 N m") != std::string::npos);
+    for (std::size_t k = 0; k < log.size(); k += 211) {
+        CHECK(maxDiff(logOff[k].q, log[k].q) == 0.0);
+        CHECK(maxDiff(logOff[k].qdd, log[k].qdd) == 0.0);
+        CHECK(maxDiff(logOff[k].tau, Vec7(log[k].tau - log[k].tauF)) < 1e-12);
+        CHECK(logOff[k].tauF.isZero());
+    }
+    CHECK(ro.peaks.maxDdqFrac == r.peaks.maxDdqFrac);
+    CHECK(ro.peaks.maxXi == r.peaks.maxXi);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // The setup and the control cycle
 
 TEST_CASE("ExperimentSetup: the start has the experiment's outputs; the controller is configured as specified")
@@ -219,7 +716,7 @@ TEST_CASE("ExperimentSetup: the start has the experiment's outputs; the controll
     const PandaExample& ex = pandaExample();
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         CHECK(s.s0() == 0.1);
         CHECK(s.duration() == e.duration);
         CHECK(s.timeout() == e.duration + 5.0);
@@ -229,20 +726,23 @@ TEST_CASE("ExperimentSetup: the start has the experiment's outputs; the controll
         CHECK(c.gains().Kp == e.gains.Kp);
         CHECK(c.gains().kdEta == e.gains.kdEta);
         CHECK(c.reference().mode == e.mode);
-        CHECK(c.redundancy() == &ex.redundancy());
+        CHECK(c.redundancy() == &exampleFor(e).redundancy());
         Controller<PandaArm>::OutputState out;
         REQUIRE(c.outputs(s.start(), 0.1, out));
         CHECK_THAT(out.eta, WithinAbs(0.1, 1e-10));
         CHECK(maxDiff(out.xi, e.xi0) < 1e-10);
         CHECK_THAT(out.beta, WithinAbs(e.beta0, 1e-10));
-        // The reference: eta_d = s0 (position), or the speed profile
+        // The reference: eta_d = s0 plus the stations, if any (position), or the speed profile
         double ref = 0.0, d1 = 0.0, d2 = 0.0;
         const TangentialReference r = s.reference();
         if (e.mode == TangentialReference::Mode::Position) {
             r.position(3.0, ref, d1, d2);
-            CHECK(ref == 0.1);
-            CHECK(d1 == 0.0);
-            CHECK(d2 == 0.0);
+            double se = 0.0, sd1 = 0.0, sd2 = 0.0;
+            e.stations.eval(3.0, se, sd1, sd2);
+            CHECK(ref == 0.1 + se);
+            CHECK(d1 == sd1);
+            CHECK(d2 == sd2);
+            CHECK(s.referenceSpeed(3.0) == sd1);
         } else {
             double nu = 0.0, dnu = 0.0;
             e.speed.eval(5.0, nu, dnu);
@@ -486,7 +986,7 @@ TEST_CASE("preflight: every experiment passes, kinematic only; the peaks of the 
     const PandaExample& ex = pandaExample();
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         std::vector<ExperimentLogRow> log;
         const PreflightReport r = preflight(s, nullptr, s.monitor(), &log);
         INFO(r.summary());
@@ -534,6 +1034,40 @@ TEST_CASE("preflight: every experiment passes, kinematic only; the peaks of the 
     CHECK(maxDiff(loopsLog.back().q, loops.start()) < 2e-3);
 }
 
+TEST_CASE("preflight: every experiment passes on the hardware lift (the robot driver's example)", SLOW_IN_DEBUG)
+{
+    // The driver builds the example with PandaExample::hardwareLiftWeights(); the preflight of every experiment
+    // must pass on it too, kinematic only and with the test model, with the same margins as on the paper's lift
+    PandaExamples hw(0.1, PandaExample::hardwareLiftWeights());
+    const FakeDynamics dyn;
+    for (const ExperimentSpec& e : experiments()) {
+        CAPTURE(e.name);
+        if (e.path == PathKind::DomeEight) {
+            // The dome's twist about the tool axis (+-46 deg) needs joint 7; with the weight 10 on it the lift
+            // finds no configuration part way round (2026-11-02). The driver runs the unweighted lift.
+            CHECK_THROWS_AS(hw(e), std::runtime_error);
+            continue;
+        }
+        const ExperimentSetup s(hw(e), e);
+        for (const DynamicsModel* model : {static_cast<const DynamicsModel*>(nullptr), static_cast<const DynamicsModel*>(&dyn)}) {
+            const PreflightReport r = preflight(s, model, s.monitor());
+            INFO(r.summary());
+            CHECK(r.ok);
+            checkWithinLimits(r);
+            CHECK(r.peaks.minJointMargin > 0.3);
+        }
+    }
+    // loops on the hardware lift: joint 1 moves (the point of the lift), still far inside its limits
+    std::vector<ExperimentLogRow> log;
+    const ExperimentSetup loops(hw(spec("loops")), spec("loops"));
+    REQUIRE(preflight(loops, nullptr, loops.monitor(), &log).ok);
+    double maxDq1 = 0.0;
+    for (const ExperimentLogRow& row : log)
+        maxDq1 = std::max(maxDq1, std::abs(row.dq[0]));
+    CHECK(maxDq1 > 0.15);
+    CHECK(maxDq1 < 0.15 * PandaArm::dqMax()[0]);
+}
+
 TEST_CASE("preflight: every experiment passes with a dynamics model; the torques are M qdd* + C qd and G",
           SLOW_IN_DEBUG)
 {
@@ -541,7 +1075,7 @@ TEST_CASE("preflight: every experiment passes with a dynamics model; the torques
     const FakeDynamics dyn;
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         std::vector<ExperimentLogRow> log;
         const PreflightReport r = preflight(s, &dyn, s.monitor(), &log);
         INFO(r.summary());
@@ -550,10 +1084,12 @@ TEST_CASE("preflight: every experiment passes with a dynamics model; the torques
         CHECK(r.summary().find("NOT checked") == std::string::npos);
         checkWithinLimits(r);
         CHECK(r.peaks.maxTauFrac > 0.0);
-        // The torques of the log, recomputed from the model at a few rows
+        // The torques of the log, recomputed from the model at a few rows (plus the friction feedforward and the
+        // rotor inertia: loops)
         for (std::size_t k = 0; k < log.size(); k += log.size() / 7) {
             const ExperimentLogRow& row = log[k];
-            const Vec7 tau = dyn.mass(row.q) * row.qdd + dyn.coriolis(row.q, row.dq);
+            const Vec7 tau = dyn.mass(row.q) * row.qdd + e.rotorInertia.cwiseProduct(row.qdd)
+                             + dyn.coriolis(row.q, row.dq) + row.tauF;
             CHECK(maxDiff(row.tau, tau) < 1e-12);
             CHECK(maxDiff(row.tauG, Vec7(tau + dyn.gravity(row.q))) < 1e-12);
         }
@@ -570,7 +1106,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("paper");
         e.xi0 = 1.5 * PandaExample::xi0();  // |xi0| = 0.047 > 0.04
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Tube);
@@ -581,8 +1117,8 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     SECTION("a start beta outside the redundancy margin: Redundancy at t = 0")
     {
         ExperimentSpec e = spec("self-motion");
-        e.beta0 = 0.06;
-        const ExperimentSetup s(ex, e);
+        e.beta0 = 0.12;
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Redundancy);
@@ -592,7 +1128,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("paper");
         e.gains = Gains::fromLambda(30.0);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Acceleration);
@@ -603,7 +1139,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("paper");
         e.rampTime = 0.0;
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         std::vector<ExperimentLogRow> log;
         const PreflightReport r = preflight(s, nullptr, s.monitor(), &log);
         CHECK_FALSE(r.ok);
@@ -623,7 +1159,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("recover");
         e.rampTime = 0.0;  // the first command, 25 % of an acceleration limit, passes; its torque jumps from 0
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const ScaledInertia dyn(0.5);
         const PreflightReport r = preflight(s, &dyn, s.monitor());
         CHECK_FALSE(r.ok);
@@ -646,8 +1182,9 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
         ExperimentSpec e = spec("loops");
         e.speed = {0.05, 2.0, 1.0, 0.0};  // stops abruptly at 3 s ...
         e.gains.kt = 0.01;                // ... and the tangential law takes 100 s to brake
+        e.gains.kiEta = 0.0;              // (without the integral action, which would brake it)
         e.duration = 3.0;
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Timeout);
@@ -684,8 +1221,8 @@ TEST_CASE("preflight from a given start: the measured start after the approach")
     const PreflightReport n = preflight(s, nullptr, s.monitor(), nullptr, &near);
     CHECK(n.ok);
     CHECK(n.startBeta != base.startBeta);
-    // A start beyond the margin: the same pose with beta = 0.055 instead of 0.04 (Redundancy at t = 0)
-    const Vec7 far = ex.start(ex.redundancy(), Vec5::Zero(), 0.055);
+    // A start beyond the margin: the same pose with beta = 0.11 instead of 0.04 (Redundancy at t = 0)
+    const Vec7 far = ex.start(ex.redundancy(), Vec5::Zero(), 0.11);
     const PreflightReport f = preflight(s, nullptr, s.monitor(), nullptr, &far);
     CHECK_FALSE(f.ok);
     CHECK(f.violation == Violation::Redundancy);

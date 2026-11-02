@@ -245,7 +245,7 @@ TEST_CASE("Panda limits: the table of the design doc, entry by entry; the rest p
     STATIC_REQUIRE(HardwareBounds::tauRateFrac * PandaArm::tauRateMax == 600.0);
     STATIC_REQUIRE(HardwareBounds::flangeSpeed == 0.5);
     STATIC_REQUIRE(HardwareBounds::xi == 0.04);
-    STATIC_REQUIRE(HardwareBounds::beta == 0.05);
+    STATIC_REQUIRE(HardwareBounds::beta == 0.1);
     STATIC_REQUIRE(HardwareBounds::sigmaMin == 1e-3);
 }
 

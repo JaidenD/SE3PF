@@ -3,8 +3,10 @@
 // The only code of the project that includes libfranka. The same source builds two programs:
 //   robot_driver       against the real libfranka 0.9.2 (cmake -DSE3PF_WITH_LIBFRANKA=ON -DFranka_DIR=...);
 //   robot_driver_mock  against mock/franka (always built with the tests; software in the loop), with the test-only
-//                      options --yes (answers every prompt) and --inject (forces a violation), compiled only into
-//                      the mock build (SE3PF_MOCK_FRANKA).
+//                      options --yes (answers every prompt), --inject (forces a violation) and --before-ctrl1
+//                      (the experiment with the controller as it ran before CTRL-1: the paper's lift and gains, no
+//                      friction feedforward, franka::Model's M alone), compiled only into the mock build
+//                      (SE3PF_MOCK_FRANKA).
 //
 // Usage:
 //   robot_driver list                                          the experiments, in the order to run them
@@ -16,6 +18,11 @@
 //                                                              own model (load included); no motion
 //   robot_driver <ip> error-recovery                           automaticErrorRecovery() after a reflex; no motion
 //                                                              (not to be confused with the experiment 'recover')
+//   robot_driver <ip> identify [--joint=N] [--log=file.csv] [--overwrite]
+//                                                              joint identification (se3pf/identify.hpp): torque
+//                                                              ramps and steps on one joint at a time from where
+//                                                              the arm is, the others held; MOVES each joint by up
+//                                                              to 0.08 rad
 //   robot_driver <ip> <experiment> [--dry-run] [--log=file.csv] [--overwrite]
 //                                                              one experiment (below); --no-rt only with --dry-run
 //
@@ -35,7 +42,8 @@
 //      start (printed next to their bounds); and the preflight again, from the measured start configuration;
 //   8. Enter; the state is read again and step 7 repeated; the 1 kHz torque loop: ExperimentLoop::follow (the
 //      preflight's cycle: Controller::step, then the safety monitor's checks), tau = M(q) qdd* + C(q, qd) qd from
-//      franka::Model (the robot adds G), sent with libfranka's rate limiter and low-pass filter.
+//      franka::Model (the robot adds G) plus the experiment's friction feedforward tau_f (CTRL-1), sent with
+//      libfranka's rate limiter and low-pass filter.
 // On any violation, or a failed step, the loop switches to the safety stop (SafetyStop, se3pf/experiments.hpp): a
 // damped hold at the configuration of the violation, tau = -K_s (q - q_stop) - D qd, until the arm has been at rest
 // (|qd| < 0.01 rad/s) for 0.1 s, or for at most 2 s; then the loop ends and the robot's own controller takes the arm.
@@ -67,6 +75,7 @@
 #include "franka_convert.hpp"
 #include "robot_log.hpp"
 #include "se3pf/experiments.hpp"
+#include "se3pf/identify.hpp"
 #include "se3pf/panda.hpp"
 #include "se3pf/panda_example.hpp"
 #include "se3pf/preflight.hpp"
@@ -148,16 +157,19 @@ namespace {
     constexpr double kKinematicsTolerance = 1e-5;  // PandaArm against franka::Model, pose and J_b entries
     constexpr double kMaxApproachDistance = 1.0;   // rad, any joint: farther, guide the arm closer in Desk first
     constexpr double kStartTolerance = 0.01;       // rad, any joint, after the approach
-    // |xi - xi0| and |beta - beta0| after the approach (5 % of the 0.04 tube bound, 4 % of the 0.05 beta bound; the
-    // mock's approach ends 1e-5 off, the robot's should be about 1e-4). A sanity check: the margins themselves are
-    // checked by a second preflight from the measured start.
-    constexpr double kStartOutputTolerance = 2e-3;
+    // |xi - xi0| and |beta - beta0| after the approach (10 % of the 0.04 tube bound, 8 % of the 0.05 beta bound; the
+    // mock's approach ends 1e-5 off, the robot's ended 5e-4 rad off per joint on 2026-10-19, and on the hardware lift
+    // beta is three times as sensitive to a joint error as on the paper's: 1 mrad on every joint gives 3.3e-3). A
+    // sanity check that the arm is where the preflight assumed: the margins themselves are checked by a second
+    // preflight from the measured start.
+    constexpr double kStartOutputTolerance = 4e-3;
     constexpr double kRestSpeed = 0.02;            // rad/s: the arm must be at rest before a motion
 
     struct Options {
         std::string ip;
         std::string command;       // check, preflight, error-recovery, or an experiment name
         std::string which = "all"; // preflight: one experiment or all
+        int joint = 0;             // identify: 1-based joint, 0 = all
         std::string logPath;       // run: the log file (default robot_<name>_<time>.csv)
         std::string logDir;        // preflight: write the predictions there
         bool dryRun = false;
@@ -166,6 +178,8 @@ namespace {
         bool yes = false;          // mock build only: answer every prompt
         Violation inject = Violation::None;  // mock build only: force this violation from injectTime on ...
         double injectTime = 0.0;             // ... s after the torque loop started
+        bool beforeCtrl1 = false;            // mock build only: the controller as before CTRL-1 (the paper's gains,
+                                             // no friction feedforward, no rotor inertia)
     };
 
     void usage(const char* prog)
@@ -174,12 +188,15 @@ namespace {
                   << "       " << prog << " <robot-ip> check [--no-rt]\n"
                   << "       " << prog << " <robot-ip> preflight [experiment|all] [--log-dir=DIR] [--no-rt]\n"
                   << "       " << prog << " <robot-ip> error-recovery\n"
+                  << "       " << prog << " <robot-ip> identify [--joint=N] [--log=file.csv] [--overwrite]\n"
                   << "       " << prog << " <robot-ip> <experiment> [--dry-run [--no-rt]] [--log=file.csv] "
                                           "[--overwrite]\n"
 #ifdef SE3PF_MOCK_FRANKA
                   << "  (mock build) --yes answers every prompt; --inject=<violation>@<t> forces that violation t s "
                      "into the torque loop (violations: projection, joint-limit, joint-velocity, acceleration, "
-                     "torque, torque-rate, flange-speed, tube, redundancy, conditioning, non-finite, timeout)\n"
+                     "torque, torque-rate, flange-speed, tube, redundancy, conditioning, non-finite, timeout); "
+                     "--before-ctrl1 runs the experiment with the controller as before CTRL-1 (the paper's lift and "
+                     "gains, no friction feedforward, franka::Model's M alone)\n"
 #endif
                   << "exit codes: 0 ok, 1 usage, 2 unknown experiment, 3 kinematics check, 4 preflight, 5 safety "
                      "stop, 6 aborted, 7 not ready / not at the start, 8 libfranka error, 9 log file\n";
@@ -256,6 +273,42 @@ namespace {
             s += buf;
         }
         return s + ")";
+    }
+
+    // The friction feedforward of an experiment (FrictionFeedforward), for list and before a run
+    void printFriction(const ExperimentSpec& e, const char* indent)
+    {
+        if (!e.friction.active()) {
+            std::printf("%sfriction feedforward: off\n", indent);
+            return;
+        }
+        std::printf("%sfriction feedforward tau_f = Fc tanh(v / v0) + Fv v, v = q*'(eta) nu_d(t) (the reference "
+                    "velocity along the lift):\n%s  Fc = %s N m, Fv = %s N m s/rad, v0 = %.3f rad/s\n",
+                    indent, indent, vecString(e.friction.coulomb, 3).c_str(), vecString(e.friction.viscous, 3).c_str(),
+                    e.friction.velocityScale);
+    }
+
+    // The gains of the experiment (Gains), with the integral action if any
+    void printGains(const ExperimentSpec& e, const char* indent)
+    {
+        const Gains& g = e.gains;
+        std::printf("%sgains: K_p %.0f, K_d %.0f, k_t %.0f (k_p,eta %.0f, k_d,eta %.0f), K_p,beta %.0f, K_d,beta %.0f",
+                    indent, g.Kp, g.Kd, g.kt, g.kpEta, g.kdEta, g.KpBeta, g.KdBeta);
+        if (g.kiEta > 0.0 || g.Ki > 0.0 || g.KiBeta > 0.0)
+            std::printf("; integral action k_i,eta %.0f, K_i %.0f, K_i,beta %.0f, clamped at %.1f, %.1f, %.1f\n",
+                        g.kiEta, g.Ki, g.KiBeta, g.integralMaxEta, g.integralMaxXi, g.integralMaxBeta);
+        else
+            std::printf("; no integral action\n");
+    }
+
+    // The rotor inertia added to M in the command (ExperimentSpec::rotorInertia)
+    void printRotorInertia(const ExperimentSpec& e, const char* indent)
+    {
+        if (e.rotorInertia.isZero())
+            std::printf("%scommand inertia: franka::Model's M alone\n", indent);
+        else
+            std::printf("%scommand inertia: M + diag%s kg m^2 (reflected rotor inertia)\n", indent,
+                        vecString(e.rotorInertia, 3).c_str());
     }
 
     const char* modeName(franka::RobotMode m)
@@ -398,14 +451,15 @@ namespace {
         Vec7 q;
     };
 
-    // The configurations of the kinematics check (besides the robot's own q): the rest posture, every experiment's
-    // start and eight points of the lift q*(s).
+    // The configurations of the kinematics check (besides the robot's own q): the rest posture, the start of every
+    // experiment on the example's path and eight points of its lift q*(s).
     std::vector<NamedConfiguration> checkConfigurations(const PandaExample& example)
     {
         std::vector<NamedConfiguration> qs;
         qs.push_back({"the rest posture", PandaArm::restPosture()});
         for (const ExperimentSpec& e : experiments())
-            qs.push_back({"the start of " + e.name, ExperimentSetup(example, e).start()});
+            if (e.path == example.pathKind())  // the starts of the experiments on this example's path
+                qs.push_back({"the start of " + e.name, ExperimentSetup(example, e).start()});
         for (int k = 0; k < 8; ++k) {
             Vec7 q = Vec7::Zero();
             const double s = k * example.tube().length() / 8.0;
@@ -540,11 +594,21 @@ namespace {
             std::printf("Not ready: the arm is moving (|dq| = %.3f rad/s).\n", speed);
             return false;
         }
-        const double distance = (start - vec7(s.q)).cwiseAbs().maxCoeff();
+        const Vec7 q = vec7(s.q);
+        const double distance = (start - q).cwiseAbs().maxCoeff();
         if (!(distance <= kMaxApproachDistance)) {
-            std::printf("Not ready: joint distance to the start %.2f rad > %.1f rad. Guide the arm by hand close to "
-                        "the start (near the rest posture %s) and run again.\n",
-                        distance, kMaxApproachDistance, vecString(PandaArm::restPosture(), 2).c_str());
+            std::printf("Not ready: joint distance to the start %.2f rad > %.1f rad (the approach moves at most %.1f "
+                        "rad per joint). Guide the arm by hand (Desk guiding mode) so that every joint is within "
+                        "%.1f rad of the start, then run again:\n",
+                        distance, kMaxApproachDistance, kMaxApproachDistance, kMaxApproachDistance);
+            for (int i = 0; i < 7; ++i) {
+                const double d = start[i] - q[i];
+                std::printf("  joint %d: now %+.3f rad, start %+.3f rad, %s%+.2f rad%s\n", i + 1, q[i], start[i],
+                            std::abs(d) <= kMaxApproachDistance ? "ok (" : "MOVE IT BY ", d,
+                            std::abs(d) <= kMaxApproachDistance ? ")" : "");
+            }
+            std::printf("  (the rest posture %s is close to every experiment's start)\n",
+                        vecString(PandaArm::restPosture(), 2).c_str());
             return false;
         }
         return true;
@@ -555,7 +619,7 @@ namespace {
     bool atStart(const franka::RobotState& s, const ExperimentSetup& setup, bool verbose)
     {
         const ExperimentSpec& spec = setup.spec();
-        const SafetyLimits& b = setup.monitor().limits();
+        const SafetyLimits b = setup.monitor().limits();  // a copy: monitor() returns a temporary
         const ExperimentLoop probe(setup, setup.monitor());
         ExperimentLoop::Status st;
         const Vec7 q = vec7(s.q), dq = vec7(s.dq);
@@ -652,7 +716,7 @@ namespace {
             const auto start = std::chrono::steady_clock::now();
             t += period.toSec();
             const Vec7 q = vec7(s.q), dq = vec7(s.dq);
-            Vec7 tau = Vec7::Zero(), tauG = Vec7::Zero(), qdd = Vec7::Zero();
+            Vec7 tau = Vec7::Zero(), tauG = Vec7::Zero(), qdd = Vec7::Zero(), tauF = Vec7::Zero();
             ExperimentLoop::Status st;
             bool done = false;
             bool violatedNow = false;
@@ -678,6 +742,7 @@ namespace {
                 } else {
                     tau = cycle.tau;
                     tauG = cycle.tauG;
+                    tauF = cycle.tauF;
                     done = cycle.finished;
                     res.finished = done;
                 }
@@ -699,7 +764,8 @@ namespace {
             res.tEnd = t;
             if (res.rows < log.size()) {
                 ExperimentLogRow& row = log[res.rows++];
-                row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, tauG);
+                row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, tauG, tauF, &loop.setup().example().path());
+                row.tauJ = vec7(s.tau_J);
                 row.periodMs = static_cast<double>(period.toMSec());
                 row.successRate = s.control_command_success_rate;
                 row.computeUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
@@ -768,6 +834,10 @@ namespace {
         for (const ExperimentSpec& e : experiments()) {
             std::printf("%d. %-12s %s (%.0f s + time to rest)\n   %s\n   Watch: %s\n", k++, e.name.c_str(),
                         e.title.c_str(), e.duration, e.purpose.c_str(), e.watch.c_str());
+            std::printf("   path: %s\n", toString(e.path));
+            printGains(e, "   ");
+            printFriction(e, "   ");
+            printRotorInertia(e, "   ");
         }
         return kOk;
     }
@@ -786,18 +856,18 @@ namespace {
         return checkKinematics(model, state, checkConfigurations(example)) ? kOk : kKinematics;
     }
 
-    int cmdPreflight(franka::Robot& robot, const PandaExample& example, const Options& opt)
+    int cmdPreflight(franka::Robot& robot, PandaExamples& examples, const Options& opt)
     {
         const franka::RobotState state = robot.readOnce();
         printLoad(state);
         franka::Model model = robot.loadModel();
-        const bool kinematicsOk = checkKinematics(model, state, checkConfigurations(example));
+        const bool kinematicsOk = checkKinematics(model, state, checkConfigurations(examples.get(PathKind::Coning)));
         const FrankaDynamics dyn(model, state);
         bool ok = true;
         for (const ExperimentSpec& e : experiments()) {
             if (opt.which != "all" && opt.which != e.name)
                 continue;
-            const ExperimentSetup setup(example, e);
+            const ExperimentSetup setup(examples(e), e);
             std::vector<ExperimentLogRow> prediction;
             ok = runPreflight(setup, dyn, &prediction).ok && ok;
             if (!opt.logDir.empty()) {
@@ -809,6 +879,198 @@ namespace {
         if (!kinematicsOk)
             return kKinematics;
         return ok ? kOk : kPreflight;
+    }
+
+    // Joint identification (se3pf/identify.hpp): from where the arm is, hold every joint with the damped hold and
+    // pulse one joint at a time. The same gates as a run: log path, kinematics, load, a static check of the torque
+    // budget, realtime, Idle and at rest, Enter; the monitor's state and torque checks every cycle; the safety
+    // stop on a violation.
+    int cmdIdentify(franka::Robot& robot, const PandaExample& example, const Options& opt)
+    {
+        const IdentifySettings settings;
+        std::vector<int> joints;
+        if (opt.joint > 0)
+            joints.push_back(opt.joint - 1);
+        else
+            for (int j = 0; j < 7; ++j)
+                joints.push_back(j);
+        const std::string logPath = opt.logPath.empty() ? defaultLogPath("identify") : opt.logPath;
+        std::printf("Joint identification: for each of %zu joint(s), in each direction, a torque ramp at %.2f N m/s "
+                    "until the joint moves (cap %s N m), then two torque steps of %s and %s N m above the "
+                    "breakaway for %.2f s (at most %.2f rad of travel, %.1f rad/s); the other joints held where "
+                    "they are.\n",
+                    joints.size(), settings.rampRate, vecString(settings.torqueCap, 1).c_str(),
+                    vecString(settings.stepExtra1, 1).c_str(), vecString(settings.stepExtra2, 1).c_str(),
+                    settings.stepDuration, settings.travelLimit, settings.speedLimit);
+        if (!checkLogPath(logPath, opt.overwrite))
+            return kLogError;
+        franka::Model model = robot.loadModel();
+        franka::RobotState state = robot.readOnce();
+        printState(state);
+        if (!checkKinematics(model, state, checkConfigurations(example)))
+            return kKinematics;
+        printLoad(state);
+        if (!askYes(opt, "Does this load match the end effector mounted on the robot right now?")) {
+            std::printf("Aborted: set the end effector in Desk (Settings > End Effector), then run again.\n");
+            return kAborted;
+        }
+        // The static preflight: every joint far enough from its limits for the travel, and the largest command
+        // (the cap plus the hold's clamp is never both; the cap plus gravity) inside the torque margin
+        const Vec7 q0 = vec7(state.q);
+        const Vec7 G = vec7(model.gravity(state));
+        const SafetyMonitor monitor;
+        const SafetyLimits& b = monitor.limits();
+        bool ok = true;
+        for (int j : joints) {
+            const double margin = std::min(q0[j] - PandaArm::qMin()[j], PandaArm::qMax()[j] - q0[j]);
+            const double need = settings.travelLimit + b.jointMargin + 0.05;
+            const double tauPeak = settings.torqueCap[j] + settings.stepExtra2[j] + std::abs(G[j]);
+            const double tauLimit = b.tauFrac * PandaArm::tauMax()[j];
+            std::printf("  joint %d: margin %.3f rad [needs %.3f], peak |tau + G| %.1f N m [%.1f]%s\n", j + 1, margin,
+                        need, tauPeak, tauLimit, margin >= need && tauPeak <= tauLimit ? "" : "  FAILS");
+            ok = ok && margin >= need && tauPeak <= tauLimit;
+        }
+        if (!ok) {
+            std::printf("Aborted: move the arm (Desk guiding mode) so that every joint has room, or identify fewer "
+                        "joints. Nothing moved.\n");
+            return kPreflight;
+        }
+        JointIdentification ident(settings, joints, q0);
+        std::printf("  at most %.0f s\n", ident.duration());
+
+        std::string rtDetail;
+        const bool realtime = realtimeKernel(rtDetail);
+        state = robot.readOnce();
+        if (opt.dryRun) {
+            std::printf("Dry run: no motion. For a run: robot mode %s (needs Idle); %s realtime kernel (%s).\n",
+                        modeName(state.robot_mode), realtime ? "a" : "NO", rtDetail.c_str());
+            return kOk;
+        }
+#ifndef SE3PF_MOCK_FRANKA
+        if (!realtime) {
+            std::printf("Not ready: this PC has no realtime kernel (%s). Nothing moved.\n", rtDetail.c_str());
+            return kNotReady;
+        }
+#endif
+        if (!readyToApproach(state, q0))
+            return kNotReady;
+        setDefaultBehavior(robot);
+        char what[300];
+        std::snprintf(what, sizeof(what),
+                      "The robot will MOVE: torque pulses on %zu joint(s), each by at most %.2f rad, for up to %.0f s. "
+                      "Keep the user stop in hand.",
+                      joints.size(), settings.travelLimit, ident.duration());
+        if (!confirm(opt, what))
+            return kAborted;
+        state = robot.readOnce();
+        if (!readyToApproach(state, q0))
+            return kNotReady;
+        if (!((vec7(state.q) - q0).cwiseAbs().maxCoeff() <= kStartTolerance)) {
+            std::printf("Not ready: the arm moved while waiting for Enter. Nothing moved; run again.\n");
+            return kNotReady;
+        }
+
+        // The torque loop
+        const std::size_t capacity =
+            static_cast<std::size_t>(std::ceil((ident.duration() + RunConstants::stopTime + 2.0) / RunConstants::dt));
+        std::vector<IdentifyLogRow> log(capacity);
+        std::size_t rows = 0;
+        double t = 0.0, tStop = -1.0, maxDrift = 0.0, maxCompute = 0.0;
+        long late = 0;
+        bool stopping = false, stopSettled = false;
+        Violation violation = Violation::None;
+        SafetyStop stop;
+        Vec7 tauPrev = Vec7::Zero();
+        int code = kOk;
+        std::function<franka::Torques(const franka::RobotState&, franka::Duration)> callback =
+            [&](const franka::RobotState& s, franka::Duration period) -> franka::Torques {
+            SE3PF_CALLBACK_BEGIN();
+            const auto start = std::chrono::steady_clock::now();
+            t += period.toSec();
+            const Vec7 q = vec7(s.q), dq = vec7(s.dq);
+            const Vec7 g = vec7(model.gravity(s));
+            Vec7 tau = Vec7::Zero();
+            bool done = false;
+            if (!stopping) {
+                tau = ident.step(t, q, dq, done);
+                Violation v = monitor.checkState(q, dq);
+                // The rate over the period that actually elapsed (a late packet doubles a blend's step)
+                const double dtp = period.toSec() > 0.0 ? period.toSec() : RunConstants::dt;
+                if (v == Violation::None)
+                    v = monitor.checkTorque(Vec7(tau + g), tau, tauPrev, dtp);
+                if (v == Violation::None && !(q.allFinite() && dq.allFinite()))
+                    v = Violation::NonFinite;
+#ifdef SE3PF_MOCK_FRANKA
+                if (opt.inject != Violation::None && t >= opt.injectTime && v == Violation::None)
+                    v = opt.inject;
+#endif
+                tauPrev = tau;
+                if (v != Violation::None) {
+                    stopping = true;
+                    violation = v;
+                    tStop = t;
+                    stop.begin(t, q);
+                    done = false;
+                }
+            }
+            if (stopping) {
+                tau = stop.step(t, q, dq, done);
+                maxDrift = std::max(maxDrift, (q - stop.holdConfiguration()).cwiseAbs().maxCoeff());
+                stopSettled = stop.settled();
+            }
+            if (rows < log.size()) {
+                IdentifyLogRow& row = log[rows++];
+                row.t = t;
+                row.phase = stopping ? 3 : static_cast<int>(ident.phase());
+                row.joint = stopping ? 0 : ident.activeJoint() + 1;
+                row.direction = stopping ? 0 : ident.direction();
+                row.pulse = stopping ? -1 : ident.pulse();
+                row.pulseTorque = stopping ? 0.0 : ident.pulseTorque();
+                row.tau = tau;
+                row.q = q;
+                row.dq = dq;
+                row.tauJ = vec7(s.tau_J);
+                row.G = g;
+                row.periodMs = static_cast<double>(period.toMSec());
+                row.computeUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+                                    .count();
+                maxCompute = std::max(maxCompute, row.computeUs);
+                if (rows > 1 && row.periodMs > 1.0)
+                    ++late;
+            }
+            const franka::Torques command(array7(tau));
+            SE3PF_CALLBACK_END();
+            return done ? franka::MotionFinished(command) : command;
+        };
+        try {
+            robot.control(callback, true, franka::kDefaultCutoffFrequency);
+            code = violation != Violation::None ? kSafetyStop : kOk;
+        } catch (const franka::ControlException& e) {
+            std::printf("ROBOT REFLEX / CONTROL ERROR: %s\n", e.what());
+            std::ofstream f(logPath + ".reflex.csv");
+            if (f)
+                f << franka::logToCSV(e.log);
+            code = kRobotError;
+        } catch (const std::exception& e) {
+            std::printf("ERROR in the torque loop: %s\n", e.what());
+            code = kRobotError;
+        }
+        const bool written = writeIdentifyCsv(logPath, log, rows);
+        std::printf("Log: %s (%zu rows)%s\n", logPath.c_str(), rows, written ? "" : "  COULD NOT BE WRITTEN");
+        std::printf("Identification: %zu callbacks over %.3f s; callback at most %.0f us, %ld periods longer than 1 "
+                    "ms\n",
+                    rows, t, maxCompute, late);
+#ifdef SE3PF_MOCK_FRANKA
+        std::printf("  callback allocations: %ld\n", gCallbackAllocations.load());
+#endif
+        if (violation != Violation::None)
+            std::printf("SAFETY STOP: %s at t = %.3f s; held until t = %.3f s: largest joint drift %.4f rad%s\n",
+                        toString(violation), tStop, t, maxDrift, stopSettled ? " (at rest)" : "");
+        std::vector<IdentifyLogRow> used(log.begin(), log.begin() + static_cast<long>(rows));
+        std::printf("Results (fit of the log):\n%s", identificationSummary(fitIdentification(used, settings)).c_str());
+        if (!written && code == kOk)
+            code = kLogError;
+        return code;
     }
 
     int cmdRecover(franka::Robot& robot, const Options& opt)
@@ -826,10 +1088,14 @@ namespace {
     {
         const ExperimentSetup setup(example, spec);
         const std::string logPath = opt.logPath.empty() ? defaultLogPath(spec.name) : opt.logPath;
-        std::printf("Experiment '%s': %s\n  %s\n  Watch: %s\n", spec.name.c_str(), spec.title.c_str(),
-                    spec.purpose.c_str(), spec.watch.c_str());
+        std::printf("Experiment '%s': %s\n  %s\n  Watch: %s\n  Path: %s (L = %.4f)\n", spec.name.c_str(),
+                    spec.title.c_str(), spec.purpose.c_str(), spec.watch.c_str(), toString(spec.path),
+                    example.tube().length());
         std::printf("  start q0 = %s rad (|xi0| = %.4f, beta0 = %.3f rad), %.1f s + time to rest\n",
                     vecString(setup.start()).c_str(), spec.xi0.norm(), spec.beta0, spec.duration);
+        printGains(spec, "  ");
+        printFriction(spec, "  ");
+        printRotorInertia(spec, "  ");
 
         // 1. The log, before anything else: a run whose log cannot be written must not move the robot
         if (!checkLogPath(logPath, opt.overwrite))
@@ -1010,10 +1276,19 @@ namespace {
                 if (opt.inject == Violation::None || end == v.c_str() + at + 1 || *end != '\0'
                     || !(opt.injectTime >= 0.0))
                     return false;
+            } else if (a == "--before-ctrl1") {
+                opt.beforeCtrl1 = true;
             }
 #endif
             else if (opt.command == "preflight" && a.rfind("--", 0) != 0 && opt.which == "all")
                 opt.which = a;
+            else if (opt.command == "identify" && a.rfind("--joint=", 0) == 0) {
+                const std::string v = a.substr(8);
+                char* end = nullptr;
+                opt.joint = static_cast<int>(std::strtol(v.c_str(), &end, 10));
+                if (v.empty() || end != v.c_str() + v.size() || opt.joint < 1 || opt.joint > 7)
+                    return false;
+            }
             else
                 return false;
         }
@@ -1032,7 +1307,8 @@ int main(int argc, char** argv)
         return kUsage;
     }
     const ExperimentSpec* spec = nullptr;
-    const bool known = opt.command == "check" || opt.command == "preflight" || opt.command == "error-recovery";
+    const bool known = opt.command == "check" || opt.command == "preflight" || opt.command == "error-recovery"
+                       || opt.command == "identify";
     if (!known) {
         spec = findExperiment(opt.command);
         if (spec == nullptr) {
@@ -1048,7 +1324,7 @@ int main(int argc, char** argv)
 #ifndef SE3PF_MOCK_FRANKA
     // libfranka checks realtime only when a motion starts, so check, preflight, error-recovery and --dry-run never
     // need --no-rt; its only effect on a run would be a robot moving without realtime scheduling.
-    if (opt.noRt && spec != nullptr && !opt.dryRun) {
+    if (opt.noRt && (spec != nullptr || opt.command == "identify") && !opt.dryRun) {
         std::fprintf(stderr, "--no-rt is refused for a run that moves the robot: the torque loop needs a PREEMPT_RT "
                              "kernel (docs/HARDWARE.md, section 2).\n");
         return kUsage;
@@ -1059,15 +1335,45 @@ int main(int argc, char** argv)
     std::fflush(stdout);  // stdout before anything goes to stderr
 
     try {
-        const PandaExample example;  // the paper's Panda example: path, tube, lift, kernel frame (offline, < 1 s)
+        // The paper's Panda example (path, tube, lift, kernel frame; offline, < 1 s) with the hardware lift: the
+        // rest-posture norm weighted on joint 7, which moves the flange's yaw from joint 7 to joint 1 (CTRL-1,
+        // 2026-10-19: with the paper's lift joint 1 stick-slipped at 3 to 5 mrad/s). The paper's simulations and
+        // apps keep the unweighted lift.
+        // The lift the robot runs on: the paper's (all ones) at the operator's request on 2026-10-19, to be compared
+        // with the weighted lift PandaExample::hardwareLiftWeights() (weight 10 on joint 7, which keeps joint 1 out of
+        // its stick-slip regime); swap the argument to use the weighted one.
+        // One example per path (ExperimentSpec::path), each built when an experiment first needs it
+        PandaExamples examples(0.1, Vec7::Ones());
+        (void)PandaExample::hardwareLiftWeights;
+        const PandaExample& example = examples.get(PathKind::Coning);
+        std::printf("Lift: nearest the rest posture in the norm weighted diag%s (the paper's lift: all ones)\n",
+                    vecString(example.liftWeights(), 0).c_str());
         franka::Robot robot(opt.ip, opt.noRt ? franka::RealtimeConfig::kIgnore : franka::RealtimeConfig::kEnforce);
         if (opt.command == "check")
             return cmdCheck(robot, example);
         if (opt.command == "preflight")
-            return cmdPreflight(robot, example, opt);
+            return cmdPreflight(robot, examples, opt);
         if (opt.command == "error-recovery")
             return cmdRecover(robot, opt);
-        return cmdRun(robot, example, *spec, opt);
+        if (opt.command == "identify")
+            return cmdIdentify(robot, example, opt);
+#ifdef SE3PF_MOCK_FRANKA
+        // Test only: the experiment with the controller as before CTRL-1 (tests reproduce the stall of 2026-10-19)
+        ExperimentSpec before = *spec;
+        if (opt.beforeCtrl1) {
+            before.friction = FrictionFeedforward();
+            before.rotorInertia.setZero();
+            before.gains = Gains::fromLambda(PandaExample::lambda);
+            before.gains.kt = PandaExample::kt;
+            before.gains.kpEta = 16.0;
+            before.gains.kdEta = 8.0;
+            before.gains.KpBeta = PandaExample::KpBeta;
+            before.gains.KdBeta = PandaExample::KdBeta;
+        }
+        return cmdRun(robot, examples(before), before, opt);
+#else
+        return cmdRun(robot, examples(*spec), *spec, opt);
+#endif
     } catch (const franka::IncompatibleVersionException& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "%s\n", e.what());
