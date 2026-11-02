@@ -140,7 +140,8 @@ namespace se3pf {
             sent = options.filter ? libfrankaCommand(tau, sent) : tau;
             const Vec7 delivered = sent + terms.G;  // the robot adds G
             // Logged as the driver logs it: the command before libfranka's filter, and that command plus G
-            ExperimentLogRow row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, Vec7(tau + terms.G), tauF);
+            ExperimentLogRow row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, Vec7(tau + terms.G), tauF,
+                                              &setup.example().path());
             row.periodMs = 1.0;
             run.peaks.add(row);
             run.log.push_back(row);

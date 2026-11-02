@@ -38,13 +38,13 @@ try {
     std::filesystem::create_directories(out);
     const std::string noHand = modelDir + "/panda_nohand.xml", withHand = modelDir + "/panda.xml";
 
-    const PandaExample example;
+    PandaExamples examples;
     const MujocoDynamics armModel(noHand), handModel(withHand);
     bool allOk = true;
 
     std::printf("The hardware experiments on the MuJoCo Panda (bounds in brackets; docs/HARDWARE.md)\n\n");
     for (const ExperimentSpec& spec : experiments()) {
-        const ExperimentSetup setup(example, spec);
+        const ExperimentSetup setup(examples(spec), spec);
         const SafetyMonitor monitor = setup.monitor();
         std::printf("=== %s: %s (%.0f s)\n", spec.name.c_str(), spec.title.c_str(), spec.duration);
 

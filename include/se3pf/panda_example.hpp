@@ -8,10 +8,16 @@
 #include "se3pf/redundancy.hpp"
 #include "se3pf/tube.hpp"
 
+#include <memory>
 #include <optional>
 #include <vector>
 
 namespace se3pf {
+
+    // The path of a Panda example: the paper's coning circle, or one of the paths sized for the paper's hardware
+    // results (2026-11-02, se3pf/path.hpp): the inspection orbit, the dome figure-eight and the straight rail.
+    enum class PathKind { Coning, Orbit, DomeEight, Rail };
+    const char* toString(PathKind kind);
 
     // The paper's Panda example (design doc, "Panda simulation" and Appendix: Panda), built once and owned in one
     // place: the metric, the coning-circle path, its tube, the rest-posture lift, the kernel frame, the redundancy
@@ -33,6 +39,9 @@ namespace se3pf {
             // liftWeights: the diagonal of the rest-posture norm of the lift (Lift); ones for the paper's lift,
             // hardwareLiftWeights() for the robot.
             explicit PandaExample(double l = 0.1, const Vec7& liftWeights = Vec7::Ones());
+            // The same with another path (PathKind); PandaExample(l, w) is PandaExample(PathKind::Coning, l, w).
+            explicit PandaExample(PathKind kind, double l = 0.1, const Vec7& liftWeights = Vec7::Ones());
+            PathKind pathKind() const { return kind_; }
 
             // The lift weights the robot driver uses (CTRL-1, 2026-10-19): the paper's lift gives the flange's yaw
             // to joint 7 and leaves joint 1 almost still (0.28 rad of travel per loop at up to 0.047 rad/s, slow
@@ -70,14 +79,14 @@ namespace se3pf {
             // keeps a reference to them, which would dangle at the end of the full expression.
             const Metric& metric() const& { return metric_; }
             const Matrix3d& R0() const { return R0_; }
-            const ConingCircle& path() const& { return path_; }
+            const Path& path() const& { return *path_; }
             const Tube& tube() const& { return tube_; }
             const Lift& lift() const& { return lift_; }
             const KernelFrame& kernelFrame() const& { return kernel_; }
             const LiftRedundancy& redundancy() const& { return beta_; }      // beta = X^T (q - q*), the paper's
             const CouplingRedundancy& coupling() const& { return coupling_; }  // beta = q_3 - q_1
             const Metric& metric() const&& = delete;
-            const ConingCircle& path() const&& = delete;
+            const Path& path() const&& = delete;
             const Tube& tube() const&& = delete;
             const Lift& lift() const&& = delete;
             const KernelFrame& kernelFrame() const&& = delete;
@@ -110,9 +119,10 @@ namespace se3pf {
             double duration(RunKind which) const;
 
         private:
+            PathKind kind_;
             Metric metric_;
             Matrix3d R0_;
-            ConingCircle path_;
+            std::unique_ptr<const Path> path_;
             Tube tube_;
             Lift lift_;
             KernelFrame kernel_;  // X of Lemma 3 (tube_ holds the normal frame N)

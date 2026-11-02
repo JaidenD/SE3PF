@@ -1,4 +1,5 @@
 #include "se3pf/experiments.hpp"
+#include "se3pf/se3.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,49 @@
 #include <utility>
 
 namespace se3pf {
+
+    // ---------------------------------------------------------------------------------------------------------
+    // StationSchedule
+
+    void StationSchedule::eval(double t, double& e, double& de, double& dde) const
+    {
+        e = de = dde = 0.0;
+        if (!active() || !(t >= firstDwell))  // also NaN: at the first station
+            return;
+        const double period = moveTime + dwell;
+        const double tt = t - firstDwell;
+        const int k = static_cast<int>(std::floor(tt / period));
+        if (k >= count) {
+            e = count * step;
+            return;
+        }
+        const double tau = tt - k * period;
+        e = k * step;
+        if (tau >= moveTime) {
+            e += step;
+            return;
+        }
+        // h(x) = quinticRamp(x) = 10 x^3 - 15 x^4 + 6 x^5, h' = 30 x^2 (1 - x)^2, h'' = 60 x (1 - x) (1 - 2 x)
+        const double x = tau / moveTime;
+        e += step * quinticRamp(x);
+        de = step * 30.0 * x * x * (1.0 - x) * (1.0 - x) / moveTime;
+        dde = step * 60.0 * x * (1.0 - x) * (1.0 - 2.0 * x) / (moveTime * moveTime);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // PandaExamples
+
+    PandaExamples::PandaExamples(double l, const Vec7& liftWeights) : l_(l), w_(liftWeights)
+    {
+    }
+
+    const PandaExample& PandaExamples::get(PathKind kind)
+    {
+        std::unique_ptr<PandaExample>& e = ex_[static_cast<int>(kind)];
+        if (!e)
+            e = std::make_unique<PandaExample>(kind, l_, w_);
+        return *e;
+    }
 
     // ---------------------------------------------------------------------------------------------------------
     // SpeedProfile
@@ -239,6 +283,41 @@ namespace se3pf {
                           "nu_d and beta drifting; a stall or a Redundancy stop is possible.";
                 m.friction = FrictionFeedforward();
                 v.push_back(m);
+                // PID with the measured inertia and no friction model (2026-11-02): the paper's model (M, c, G, with
+                // the drive inertia measured by 'identify', which is part of M, not friction) and no friction term;
+                // the integral action of 'loops' takes the friction as an unmodelled disturbance
+                ExperimentSpec pid = m;
+                pid.name = "loops-pid";
+                pid.title = "Two loops at constant speed: PID with the measured inertia, no friction model";
+                pid.purpose = "The 'loops' run with the PD (poles at -6, k_t = 15) plus the integral action of "
+                              "'loops', and the drive inertia measured by 'identify' in the inverse dynamics, but no "
+                              "friction model: friction is left to the integrators as an unmodelled disturbance.";
+                pid.watch = "Pass criteria as 'loops'. Compare with loops-inertia (the same run without integral "
+                            "action: eta_dot at 15 % of nu_d) and loops_14 ('loops': with the friction model, "
+                            "eta_dot at 100 %). Expect lags and transients where a joint of the lift reverses (its "
+                            "friction changes sign and the integral must unwind), and integrals near their clamps; an "
+                            "Acceleration or Redundancy stop is possible.";
+                pid.gains.kiEta = e.gains.kiEta;
+                pid.gains.Ki = e.gains.Ki;
+                pid.gains.KiBeta = e.gains.KiBeta;
+                v.push_back(pid);
+                // loops-pid with stiffer tangential gains (2026-11-02). loops_pid_1: eta_dot swung +-15 to 20 mm/s
+                // around nu_d = 50 mm/s, the same at the same point of each loop (stick-slip where joint 3 reverses);
+                // the integral sat at 0.86 of its bound. k_t 15 -> 30 and k_i,eta 25 -> 100 move the tangential poles
+                // from -1.9 and -13 to -3.8 and -26 rad/s; the bound doubles so the integral is not clamped sooner.
+                ExperimentSpec hi = pid;
+                hi.name = "loops-pid-hi";
+                hi.title = "Two loops at constant speed: loops-pid with stiffer tangential gains";
+                hi.purpose = "loops-pid with k_t = 30 and k_i,eta = 100 (bound 2.0) instead of 15 and 25 (bound 1.0): "
+                             "does a stiffer tangential loop cut the speed error that friction leaves at the joint "
+                             "reversals (loops_pid_1: +-15 to 20 mm/s at nu_d = 50 mm/s)?";
+                hi.watch = "Pass criteria as 'loops'. Compare eta_dot - nu_d with loops_pid_1. The commanded "
+                           "acceleration rises with the gains (loops_pid_1: 59 % on joint 7): watch for an "
+                           "Acceleration stop and for chatter on the wrist.";
+                hi.gains.kt = 30.0;
+                hi.gains.kiEta = 100.0;
+                hi.gains.integralMaxEta = 2.0;
+                v.push_back(hi);
             }
             {
                 ExperimentSpec e = base;
@@ -290,6 +369,229 @@ namespace se3pf {
                 e.limits.dqFrac = 0.2;
                 e.limits.flangeSpeed = 0.1;
                 v.push_back(e);
+            }
+            {
+                // The paper's paths (2026-11-02, se3pf/path.hpp): the inspection orbit and the dome figure-eight,
+                // each with a velocity reference (two loops) and a position reference (one loop in six stations).
+                // The controller of loops-pid: poles at -6, k_t = 15, the integral action of 'loops', the drive
+                // inertia measured by 'identify', no friction model (the paper models none).
+                ExperimentSpec pid = base;
+                pid.gains = Gains::fromLambda(6.0);
+                pid.gains.kt = 15.0;
+                pid.gains.kpEta = 36.0;  // position reference: tangential poles at -6 too
+                pid.gains.kdEta = 12.0;
+                pid.gains.kiEta = 25.0;
+                pid.gains.Ki = 36.0;
+                pid.gains.KiBeta = 36.0;
+                pid.gains.integralMaxEta = 1.0;
+                pid.gains.integralMaxXi = 1.0;
+                pid.gains.integralMaxBeta = 3.0;
+                pid.rotorInertia = (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished();
+                pid.limits.flangeSpeed = 0.2;
+
+                struct PathRun {
+                    PathKind kind;
+                    const char* name;
+                    const char* what;
+                    double L;  // arc length of the path in W (checked by the tests)
+                };
+                for (const PathRun& p : {PathRun{PathKind::Orbit, "orbit",
+                                                 "the inspection orbit (a 12 x 10 cm ellipse with a 3 cm vertical "
+                                                 "wave, the tool pointing at a target 25 cm below its centre: 52 deg "
+                                                 "of rotation over the loop)",
+                                                 0.78868},
+                                         PathRun{PathKind::DomeEight, "dome",
+                                                 "the dome figure-eight (the tool normal to a 25 cm dome, its contact "
+                                                 "point tracing a figure-eight over the top, twisting +-46 deg about "
+                                                 "its axis: 92 deg of rotation over the loop)",
+                                                 0.98243}}) {
+                    ExperimentSpec e = pid;
+                    e.path = p.kind;
+                    e.name = std::string(p.name) + "-velocity";
+                    e.title = std::string("Two loops of the ") + toString(p.kind) + " at constant speed";
+                    e.purpose = std::string("Velocity tracking on ") + p.what + ": nu_d rises smoothly from 0 to "
+                                "0.05 over 4 s, cruises and falls back over 4 s, two loops in all, then rest.";
+                    e.watch = "Pass: no safety stop, |xi| below 2e-2, |beta| below 3e-2 rad, eta_dot near nu_d while "
+                              "cruising. Without a friction model expect the stick-slip of loops_pid_1 where joints "
+                              "reverse, and a large commanded acceleration on the wrist (loops_pid_1: 59 %).";
+                    e.speed.nuMax = 0.05;
+                    e.speed.rampUp = 4.0;
+                    e.speed.rampDown = 4.0;
+                    e.speed.cruise = 2.0 * p.L / 0.05 - 4.0;  // the ramps travel half their time at nu_max
+                    e.duration = std::ceil(e.speed.end()) + 3.0;
+                    v.push_back(e);
+
+                    ExperimentSpec q = pid;
+                    q.path = p.kind;
+                    q.name = std::string(p.name) + "-position";
+                    q.title = std::string("One loop of the ") + toString(p.kind) + " in six stations";
+                    q.purpose = std::string("Position tracking on ") + p.what + ": eta_d(t) waits 2 s, then six "
+                                "times moves on by L / 6 (a smooth move peaking at 0.06 per second) and stops for "
+                                "2 s, one loop in all.";
+                    q.watch = "Pass: no safety stop, |xi| below 2e-2, |beta| below 3e-2 rad, eta settling on each "
+                              "station during the stops (the integral removes what friction holds).";
+                    q.mode = TangentialReference::Mode::Position;
+                    q.stations.count = 6;
+                    q.stations.step = p.L / 6.0;
+                    q.stations.moveTime = std::ceil(10.0 * 1.875 * q.stations.step / 0.06) / 10.0;
+                    q.stations.dwell = 2.0;
+                    q.stations.firstDwell = 2.0;
+                    q.duration = std::ceil(q.stations.end()) + 3.0;
+                    v.push_back(q);
+                }
+                // dome-velocity with the paper's gains (2026-11-02). dome_velocity_1 stopped on the torque rate at
+                // 21.6 s: velocity noise through K_d = 12 and k_t = 15 made joint 2's command jitter by 0.09 N m
+                // rms per period (M_22 plus 1.0 kg m^2 of drive inertia), 100 to 150 N m/s, with spikes past
+                // 600 N m/s where the dome's configuration amplifies it most. Poles at -4 (K_d = 8) and k_t = 5
+                // cut that noise; the integral gains scale with them: K_i = K_p (as in loops-pid), and
+                // k_i,eta = 6 puts the tangential poles at -2 and -3.
+                ExperimentSpec lo = *std::find_if(v.begin(), v.end(),
+                                                  [](const ExperimentSpec& x) { return x.name == "dome-velocity"; });
+                lo.name = "dome-velocity-lo";
+                lo.title = "Two loops of the dome figure-eight at constant speed, the paper's gains";
+                lo.purpose = "dome-velocity with the paper's gains (poles at -4, k_t = 5) and integral gains scaled "
+                             "to them (K_i = K_i,beta = 16, k_i,eta = 6): less velocity noise in the command than "
+                             "dome_velocity_1, which stopped on the torque rate.";
+                lo.watch = "Pass criteria as dome-velocity. Compare the torque rate (dome_velocity_1: 99th "
+                           "percentile 330 to 360 N m/s on joint 2 in the worst stretch, a stop past 600) and the "
+                           "tracking errors, which may grow with the softer gains.";
+                lo.gains = Gains::fromLambda(4.0);
+                lo.gains.kt = 5.0;
+                lo.gains.kpEta = 16.0;
+                lo.gains.kdEta = 8.0;
+                lo.gains.kiEta = 6.0;
+                lo.gains.Ki = 16.0;
+                lo.gains.KiBeta = 16.0;
+                lo.gains.integralMaxEta = 1.0;
+                lo.gains.integralMaxXi = 1.0;
+                lo.gains.integralMaxBeta = 3.0;
+                v.push_back(lo);
+
+                // Self-motion back to the lift on the orbit (2026-11-02): the flange starts on the path (xi0 = 0)
+                // with the arm off the lift by beta0 = 0.5 rad (joints 1 and 3 counter-rotated by about 19 and
+                // 21 deg; the elbow point moves only about 17 mm, since the upper arm is nearly vertical here).
+                // The beta loop: poles at -4 (K_p,beta 16, K_d,beta 8), so joint 3 stays near 18 % of its speed
+                // limit (poles at -6: 31 %), and an integral with a small bound, K_i,beta 16 at |.| <= 1.5.
+                //  - Without a beta integral (orbit_selfmotion_hold_1, beta0 0.3) static friction stopped joints 1
+                //    and 3 at beta 0.04.
+                //  - With the integral of the other runs (36, bound 3.0) beta overshot by 46 to 68 % (windup while
+                //    beta is large).
+                //  - The bound was chosen on the mock robot with the identified Coulomb friction and drive inertia
+                //    (which reproduces orbit_selfmotion_hold_1): at 1, 1.5 and 2 times that friction beta ends
+                //    within 0.001, 0.012 and 0.004 rad of the lift with at most 6 % undershoot; 15 % without
+                //    friction (the preflight).
+                // The integrals on eta and xi stay (friction).
+                // The transverse loop is stiffer than beta's: poles at -8 (K_p 64, K_d 16, K_i 64). The flange's
+                // disturbance comes from wrist joints 5 and 7 sticking while they counter-rotate, and a stiffer xi
+                // loop breaks them free at a smaller error. On the mock with 1.5 times the friction the largest
+                // flange error fell from 6.8 mm / 4.7 deg (poles at -6) to 5.0 mm / 3.4 deg (3.7 mm / 2.6 deg at
+                // -10). -10 was not chosen: scaling the torque-rate noise of orbit_selfmotion_hold_1 (max 349 N m/s
+                // at K_d 12) with K_d gives about 465 N m/s at -8 and 581 at -10, against the 600 limit.
+                // Needs a beta bound above 0.5 rad: with the committed HardwareBounds::beta = 0.1 the monitor stops
+                // the run at once.
+                ExperimentSpec sm = *std::find_if(v.begin(), v.end(),
+                                                  [](const ExperimentSpec& x) { return x.name == "orbit-position"; });
+                sm.beta0 = 0.5;
+                sm.gains.Kp = 64.0;  // transverse poles at -8, faster than beta's -4 (see below)
+                sm.gains.Kd = 16.0;
+                sm.gains.Ki = 64.0;
+                sm.gains.KpBeta = 16.0;
+                sm.gains.KdBeta = 8.0;
+                sm.gains.KiBeta = 16.0;
+                sm.gains.integralMaxBeta = 1.5;
+                sm.stations = StationSchedule();
+                sm.name = "orbit-selfmotion-hold";
+                sm.title = "Self-motion back to the lift on the orbit, the flange held at one point";
+                sm.purpose = "Starts with the flange on the inspection orbit at s0 (xi0 = 0) and the arm off the lift by "
+                             "beta0 = 0.5 rad, and holds eta = s0 for 8 s: the arm swings back onto the lift (joints 1 "
+                             "and 3 by about 19 and 21 deg) while the flange stays on the path.";
+                sm.watch = "Pass: no safety stop; |xi| below 1.2e-2 (mock with friction: up to 1e-2, from the wrist "
+                           "joints sticking while they counter-rotate), beta below 2.5e-2 rad after 4 s with less than "
+                           "10 % undershoot. Needs the beta bound above 0.5 rad.";
+                sm.duration = 8.0;
+                sm.limits.dqFrac = 0.3;
+                v.push_back(sm);
+
+                ExperimentSpec smv = *std::find_if(v.begin(), v.end(),
+                                                   [](const ExperimentSpec& x) { return x.name == "orbit-velocity"; });
+                smv.beta0 = 0.5;
+                smv.gains.Kp = 64.0;  // transverse poles at -8, faster than beta's -4 (see below)
+                smv.gains.Kd = 16.0;
+                smv.gains.Ki = 64.0;
+                smv.gains.KpBeta = 16.0;
+                smv.gains.KdBeta = 8.0;
+                smv.gains.KiBeta = 16.0;
+                smv.gains.integralMaxBeta = 1.5;
+                smv.name = "orbit-selfmotion-moving";
+                smv.title = "Self-motion back to the lift on the orbit while following it";
+                smv.purpose = "As orbit-selfmotion-hold, but the flange follows the orbit for one loop at 0.05 per "
+                              "second (4 s ramps): the arm returns to the lift while the flange tracks the path.";
+                smv.watch = "Pass: no safety stop, |xi| below 2e-2, beta below 2.5e-2 rad after 4 s and near zero "
+                            "after. Needs the beta bound above 0.5 rad.";
+                smv.speed.cruise = 0.78868 / 0.05 - 4.0;  // one loop
+                smv.duration = std::ceil(smv.speed.end()) + 3.0;
+                v.push_back(smv);
+
+                // Physical interaction on the straight rail (2026-11-02): the operator pushes the end effector
+                // along the near side by hand. The controller commands the path acceleration, and a hand's force
+                // adds to it; with nothing driving the tangential output, its law is the resistance felt along the
+                // rail: pure damping (velocity reference nu_d = 0: mu_eta = -k_t eta_dot) or a spring-damper back
+                // to s0 (position reference eta_d = s0). Across the rail and in attitude the transverse loop holds
+                // (poles at -8), and beta keeps the arm on the lift (poles at -4). No integral action anywhere: a
+                // push held for seconds would wind an integral up, and it would throw the arm back on release. The
+                // operator also feels the arm's own inertia (with the drive inertia) and its joint friction.
+                // Limits tighter than the hardware's: |xi| <= 0.03 (a push of about 3 cm across the rail stops the
+                // run; the tube radius is 0.057), flange speed 0.15 m/s, joint speeds 30 %, |beta| 0.1 rad. The
+                // robot's own collision reflex (driver: 20 N at the end effector) is a further stop: push gently.
+                ExperimentSpec rail = pid;
+                rail.path = PathKind::Rail;
+                rail.gains.Kp = 64.0;
+                rail.gains.Kd = 16.0;
+                rail.gains.KpBeta = 16.0;
+                rail.gains.KdBeta = 8.0;
+                rail.gains.kiEta = rail.gains.Ki = rail.gains.KiBeta = 0.0;
+                rail.limits.xi = 0.03;
+                rail.limits.flangeSpeed = 0.15;
+                rail.limits.dqFrac = 0.3;
+                rail.limits.beta = 0.1;
+                rail.duration = 60.0;
+
+                ExperimentSpec damper = rail;
+                damper.name = "rail-damper";
+                damper.title = "Push the end effector along a straight rail: damping along the rail";
+                damper.purpose = "The end effector starts in the middle of the straight rail's near side and holds "
+                                 "still. Push it along the rail by hand: it moves along the line against a damper "
+                                 "(k_t = 15: about 107 N per m/s, so a 10 N push moves it at about 9 cm/s), stays on the line "
+                                 "across it and keeps its attitude. 60 s, then it must come to rest.";
+                damper.watch = "Push gently (under 20 N, the robot's collision reflex), slowly (well under 0.15 m/s: "
+                               "the flange-speed stop) and only along the rail, without sharp reversals; stay on the "
+                               "straight part (+-15 cm from the start). A push across the rail beyond about 3 cm "
+                               "stops the run (|xi| bound 0.03). If the arm stops (safety stop), let go at once: the "
+                               "stop holds it stiff, and pushing on raises the force to the robot's reflex. Expect "
+                               "the joint friction on top of the damping, and a few mm across the rail.";
+                damper.mode = TangentialReference::Mode::Velocity;
+                damper.speed = SpeedProfile();  // nu_d = 0 throughout: mu_eta = -k_t eta_dot
+                // rail_damper_1 (k_t = 10): a natural push of under 1 N m at the joints ran the end effector at
+                // 136 to 166 mm/s, into the 0.15 m/s flange-speed stop (and the robot's Cartesian reflex as the hand
+                // kept pushing against the held arm). rail_damper_2 (k_t = 30) ended by the robot's Cartesian
+                // reflex: the damper's force is about 7 kg * k_t * speed, 19 N at 89 mm/s, the 20 N threshold.
+                // k_t = 15 (about 107 N s/m) reaches the 0.15 m/s speed stop first, at about 16 N; a push of about
+                // 10 N moves the end effector at about 9 cm/s.
+                damper.gains.kt = 15.0;
+                v.push_back(damper);
+
+                ExperimentSpec spring = rail;
+                spring.name = "rail-spring";
+                spring.title = "Push the end effector along a straight rail: a spring back to the start";
+                spring.purpose = "As rail-damper, but the resistance along the rail is a spring-damper towards the "
+                                 "start (position reference eta_d = s0, k_p,eta = 16, k_d,eta = 8: critically damped "
+                                 "at 4 rad/s): pushed along the rail and released, the end effector returns to the "
+                                 "start.";
+                spring.watch = damper.watch;
+                spring.mode = TangentialReference::Mode::Position;
+                spring.gains.kpEta = 16.0;  // mock: k_p,eta = 4 let friction hold it 41 mm short of the start
+                spring.gains.kdEta = 8.0;
+                v.push_back(spring);
             }
             return v;
         }
@@ -382,6 +684,13 @@ namespace se3pf {
                 throw std::invalid_argument("ExperimentSetup: the ramp time must be finite and >= 0");
             if (!s.xi0.allFinite() || !std::isfinite(s.beta0))
                 throw std::invalid_argument("ExperimentSetup: the start must be finite");
+            const StationSchedule& st = s.stations;
+            if (st.count < 0 || (st.active() && (!std::isfinite(st.step) || !(st.moveTime > 0.0) || !(st.dwell >= 0.0)
+                                                  || !(st.firstDwell >= 0.0) || !std::isfinite(st.end()))))
+                throw std::invalid_argument("ExperimentSetup: the stations need finite times, moveTime > 0");
+            if (st.active() && (s.mode != TangentialReference::Mode::Position || !(st.end() <= s.duration)))
+                throw std::invalid_argument("ExperimentSetup: stations need a position reference and must end by "
+                                            "the duration");
             if (s.mode == TangentialReference::Mode::Velocity) {
                 if (!(p.rampUp >= 0.0 && p.cruise >= 0.0 && p.rampDown >= 0.0) || !std::isfinite(p.nuMax)
                     || !std::isfinite(p.end()))
@@ -401,8 +710,18 @@ namespace se3pf {
         }
     }  // namespace
 
+    namespace {
+        const PandaExample& matching(const PandaExample& example, const ExperimentSpec& spec)
+        {
+            if (example.pathKind() != spec.path)
+                throw std::invalid_argument("ExperimentSetup: '" + spec.name + "' runs on the " + toString(spec.path)
+                                            + ", the example has the " + toString(example.pathKind()));
+            return example;
+        }
+    }  // namespace
+
     ExperimentSetup::ExperimentSetup(const PandaExample& example, const ExperimentSpec& spec)
-        : example_(example), spec_(validated(spec)),
+        : example_(matching(example, spec)), spec_(validated(spec)),
           q0_(example.start(example.redundancy(), spec.xi0, spec.beta0))
     {
     }
@@ -411,10 +730,10 @@ namespace se3pf {
     {
         if (spec_.mode == TangentialReference::Mode::Position) {
             const double etaD = s0();
-            return TangentialReference::fromPosition([etaD](double, double& e, double& de, double& dde) {
-                e = etaD;
-                de = 0.0;
-                dde = 0.0;
+            const StationSchedule st = spec_.stations;
+            return TangentialReference::fromPosition([etaD, st](double t, double& e, double& de, double& dde) {
+                st.eval(t, e, de, dde);  // zero without stations: eta_d = s0
+                e += etaD;
             });
         }
         const SpeedProfile profile = spec_.speed;
@@ -427,8 +746,11 @@ namespace se3pf {
 
     double ExperimentSetup::referenceSpeed(double t) const
     {
-        if (spec_.mode == TangentialReference::Mode::Position)
-            return 0.0;  // eta_d = s0 (reference()): the point does not move
+        if (spec_.mode == TangentialReference::Mode::Position) {
+            double e = 0.0, de = 0.0, dde = 0.0;
+            spec_.stations.eval(t, e, de, dde);  // zero without stations: eta_d = s0 does not move
+            return de;
+        }
         double nu = 0.0, dnuDt = 0.0;
         spec_.speed.eval(t, nu, dnuDt);
         return nu;
@@ -525,9 +847,13 @@ namespace se3pf {
     // Logs
 
     ExperimentLogRow makeLogRow(double t, int phase, const ExperimentLoop::Status& st, const Vec7& q, const Vec7& dq,
-                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG, const Vec7& tauF)
+                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG, const Vec7& tauF, const Path* path)
     {
         ExperimentLogRow r;
+        if (path && std::isfinite(st.eta)) {
+            const Pose g = path->pose(st.eta);
+            r.gamma << g.block<3, 1>(0, 3), logSO3(Matrix3d(g.block<3, 3>(0, 0)));
+        }
         r.t = t;
         r.phase = phase;
         r.eta = st.eta;

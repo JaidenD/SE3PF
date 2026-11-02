@@ -31,7 +31,7 @@ namespace {
     // tube, rest-posture lift Lift(path, q_r) on 2000 intervals, kernel frame and LiftRedundancy are the objects
     // under test here.
     const Metric& metric() { return testing::pandaExample().metric(); }
-    const ConingCircle& path() { return testing::pandaExample().path(); }
+    const Path& path() { return testing::pandaExample().path(); }
     const Tube& tube() { return testing::pandaExample().tube(); }
     const Lift& lift() { return testing::pandaExample().lift(); }
     const KernelFrame& kernelFrame() { return testing::pandaExample().kernelFrame(); }  // X (not the tube's frame N)
@@ -128,17 +128,18 @@ namespace {
 
     // A curve that does not close: the paper's coning circle cut off at 90 % of its length, so gamma(L) != gamma(0)
     // and the continuation ends away from q*(0), as it would if it had changed branches. Not a valid Path (gamma
-    // must be periodic): it exists to reach the Lift's closure check. Keeps a copy of the circle, not a reference.
+    // must be periodic): it exists to reach the Lift's closure check. Keeps a reference to the circle, which lives
+    // in the test program's example.
     class OpenArc final : public Path {
         public:
-            explicit OpenArc(const ConingCircle& circle) : circle_(circle) {}
+            explicit OpenArc(const Path& circle) : circle_(circle) {}
             double length() const override { return 0.9 * circle_.length(); }
             Pose pose(double s) const override { return circle_.pose(s); }
             Vec6 velocity(double s) const override { return circle_.velocity(s); }
             Vec6 acceleration(double s) const override { return circle_.acceleration(s); }
 
         private:
-            ConingCircle circle_;
+            const Path& circle_;
     };
 }
 

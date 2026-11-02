@@ -6,6 +6,8 @@
 #include "se3pf/safety.hpp"
 
 #include <cstddef>
+#include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,25 @@ namespace se3pf {
         double distance() const { return nuMax * (0.5 * rampUp + cruise + 0.5 * rampDown); }
         // nu_d(t) and its exact derivative d nu_d / dt; zero before 0 and after end(). Online.
         void eval(double t, double& nu, double& dnuDt) const;
+    };
+
+    // A position reference that visits stations along the path (2026-11-02): eta_d(t) = s0 + e(t), where e waits
+    // firstDwell, then `count` times moves on by `step` in `moveTime` and waits `dwell`. Each move is a quintic
+    // smoothstep, so eta_d, its rate and its acceleration are continuous and the peak rate is 1.875 step /
+    // moveTime. eta_d is real-valued (the controller wraps eta - eta_d), so count * step may exceed L. count = 0
+    // (the default): eta_d = s0 throughout, the hold of 'hold' and 'self-motion'.
+    struct StationSchedule {
+        int count = 0;
+        double step = 0.0;        // arc length per move, in the units of the metric
+        double moveTime = 0.0;    // s
+        double dwell = 0.0;       // s, after each move
+        double firstDwell = 0.0;  // s, before the first move
+
+        bool active() const { return count > 0; }
+        double end() const { return active() ? firstDwell + count * (moveTime + dwell) : 0.0; }
+        double peakSpeed() const { return active() ? 1.875 * std::abs(step) / moveTime : 0.0; }
+        // e(t) = eta_d(t) - s0 and its first two time derivatives. Online.
+        void eval(double t, double& e, double& de, double& dde) const;
     };
 
     // Joint friction feedforward (CTRL-1). On the robot (HW-3, 2026-10-19) 'loops' stalled: from t = 6 s no joint
@@ -83,6 +104,7 @@ namespace se3pf {
         std::string title;
         std::string purpose;  // what it shows
         std::string watch;    // what the operator watches, and when the run counts as passed
+        PathKind path = PathKind::Coning;  // the example's path (the coning circle unless the spec says otherwise)
 
         Vec5 xi0 = Vec5::Zero();  // start: transverse output (|xi0| = 0.0312 is the paper's start)
         double beta0 = 0.0;       // start: redundancy output, rad
@@ -91,6 +113,7 @@ namespace se3pf {
         // (eq:tan-pos), the point of the path where the run starts.
         TangentialReference::Mode mode = TangentialReference::Mode::Velocity;
         SpeedProfile speed;
+        StationSchedule stations;  // Position: the stations eta_d(t) visits (none: hold s0)
 
         double duration = 0.0;  // T, s
         Gains gains;
@@ -174,8 +197,24 @@ namespace se3pf {
             Vec7 qStop_ = Vec7::Zero();
     };
 
+    // The Panda examples the experiments run on, one per path (ExperimentSpec::path), each built the first time it is
+    // asked for (offline, under a second each) with the same metric scale l and lift weights. The examples must
+    // outlive every setup made from them, so keep this object for the whole program.
+    class PandaExamples {
+        public:
+            explicit PandaExamples(double l = 0.1, const Vec7& liftWeights = Vec7::Ones());
+            const PandaExample& get(PathKind kind);  // throws as PandaExample does
+            const PandaExample& operator()(const ExperimentSpec& spec) { return get(spec.path); }
+            const Vec7& liftWeights() const { return w_; }
+
+        private:
+            double l_;
+            Vec7 w_;
+            std::unique_ptr<PandaExample> ex_[4];
+    };
+
     // An experiment made concrete with the Panda example: its start configuration, its tangential reference and its
-    // controller. Keeps a reference to the example, which must outlive it (and every controller it builds).
+    // controller. The example's path must be the spec's (std::invalid_argument otherwise). Keeps a reference to the example, which must outlive it (and every controller it builds).
     // Construction is offline: throws std::invalid_argument for an invalid spec (duration not finite and positive,
     // a speed profile longer than the duration or with negative times, a negative ramp time, a friction feedforward
     // with a negative or non-finite Fc or Fv or a velocity scale that is not positive), and std::runtime_error if no
@@ -192,10 +231,10 @@ namespace se3pf {
             double duration() const { return spec_.duration; }
             double timeout() const { return spec_.duration + RunConstants::timeoutExtra; }
 
-            // nu_d(t) of the speed profile (Velocity), or eta_d(t) = s0 (Position)
+            // nu_d(t) of the speed profile (Velocity), or eta_d(t) = s0 + the station schedule (Position)
             TangentialReference reference() const;
-            // The speed the reference asks for at t: nu_d(t) (Velocity), or d eta_d / dt = 0 (Position: eta_d = s0
-            // holds a point of the path). The friction feedforward's eta_dot_ref. Online.
+            // The speed the reference asks for at t: nu_d(t) (Velocity), or d eta_d / dt (Position: zero while
+            // eta_d holds a point of the path). The friction feedforward's eta_dot_ref. Online.
             double referenceSpeed(double t) const;
             // Controller<PandaArm> with the example's tube and beta, the spec's gains, reference() and the mu ramp,
             // reset to eta-hat = s0. Every user (driver, preflight, MuJoCo) builds its controller here.
@@ -293,11 +332,16 @@ namespace se3pf {
         double computeUs = 0.0;     // driver only: time spent in the callback, microseconds
         double periodMs = 0.0;      // driver only: libfranka's period of this callback, ms
         double successRate = 0.0;   // driver only: RobotState::control_command_success_rate
+        // The desired pose gamma(eta) at the projected eta: position (m) and rotation vector (rad), NaN if not
+        // given (2026-11-02: so that the plots need not know the path)
+        Vec6 gamma = Vec6::Constant(std::numeric_limits<double>::quiet_NaN());
     };
 
     // A row from one following cycle (phase 0) or from the outputs observed in the stopping phase (phase 1).
+    // With a path, gamma is set from path.pose(st.eta).
     ExperimentLogRow makeLogRow(double t, int phase, const ExperimentLoop::Status& st, const Vec7& q, const Vec7& dq,
-                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG, const Vec7& tauF);
+                                const Vec7& qdd, const Vec7& tau, const Vec7& tauG, const Vec7& tauF,
+                                const Path* path = nullptr);
 
     // The peaks of a run over its following rows (phase 0), as the preflight reports them, measured the way the
     // SafetyMonitor checks them. Joints are zero-based. Offline (add evaluates the kinematics for the flange speed).

@@ -451,14 +451,15 @@ namespace {
         Vec7 q;
     };
 
-    // The configurations of the kinematics check (besides the robot's own q): the rest posture, every experiment's
-    // start and eight points of the lift q*(s).
+    // The configurations of the kinematics check (besides the robot's own q): the rest posture, the start of every
+    // experiment on the example's path and eight points of its lift q*(s).
     std::vector<NamedConfiguration> checkConfigurations(const PandaExample& example)
     {
         std::vector<NamedConfiguration> qs;
         qs.push_back({"the rest posture", PandaArm::restPosture()});
         for (const ExperimentSpec& e : experiments())
-            qs.push_back({"the start of " + e.name, ExperimentSetup(example, e).start()});
+            if (e.path == example.pathKind())  // the starts of the experiments on this example's path
+                qs.push_back({"the start of " + e.name, ExperimentSetup(example, e).start()});
         for (int k = 0; k < 8; ++k) {
             Vec7 q = Vec7::Zero();
             const double s = k * example.tube().length() / 8.0;
@@ -763,7 +764,7 @@ namespace {
             res.tEnd = t;
             if (res.rows < log.size()) {
                 ExperimentLogRow& row = log[res.rows++];
-                row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, tauG, tauF);
+                row = makeLogRow(t, stopping ? 1 : 0, st, q, dq, qdd, tau, tauG, tauF, &loop.setup().example().path());
                 row.tauJ = vec7(s.tau_J);
                 row.periodMs = static_cast<double>(period.toMSec());
                 row.successRate = s.control_command_success_rate;
@@ -833,6 +834,7 @@ namespace {
         for (const ExperimentSpec& e : experiments()) {
             std::printf("%d. %-12s %s (%.0f s + time to rest)\n   %s\n   Watch: %s\n", k++, e.name.c_str(),
                         e.title.c_str(), e.duration, e.purpose.c_str(), e.watch.c_str());
+            std::printf("   path: %s\n", toString(e.path));
             printGains(e, "   ");
             printFriction(e, "   ");
             printRotorInertia(e, "   ");
@@ -854,18 +856,18 @@ namespace {
         return checkKinematics(model, state, checkConfigurations(example)) ? kOk : kKinematics;
     }
 
-    int cmdPreflight(franka::Robot& robot, const PandaExample& example, const Options& opt)
+    int cmdPreflight(franka::Robot& robot, PandaExamples& examples, const Options& opt)
     {
         const franka::RobotState state = robot.readOnce();
         printLoad(state);
         franka::Model model = robot.loadModel();
-        const bool kinematicsOk = checkKinematics(model, state, checkConfigurations(example));
+        const bool kinematicsOk = checkKinematics(model, state, checkConfigurations(examples.get(PathKind::Coning)));
         const FrankaDynamics dyn(model, state);
         bool ok = true;
         for (const ExperimentSpec& e : experiments()) {
             if (opt.which != "all" && opt.which != e.name)
                 continue;
-            const ExperimentSetup setup(example, e);
+            const ExperimentSetup setup(examples(e), e);
             std::vector<ExperimentLogRow> prediction;
             ok = runPreflight(setup, dyn, &prediction).ok && ok;
             if (!opt.logDir.empty()) {
@@ -1086,8 +1088,9 @@ namespace {
     {
         const ExperimentSetup setup(example, spec);
         const std::string logPath = opt.logPath.empty() ? defaultLogPath(spec.name) : opt.logPath;
-        std::printf("Experiment '%s': %s\n  %s\n  Watch: %s\n", spec.name.c_str(), spec.title.c_str(),
-                    spec.purpose.c_str(), spec.watch.c_str());
+        std::printf("Experiment '%s': %s\n  %s\n  Watch: %s\n  Path: %s (L = %.4f)\n", spec.name.c_str(),
+                    spec.title.c_str(), spec.purpose.c_str(), spec.watch.c_str(), toString(spec.path),
+                    example.tube().length());
         std::printf("  start q0 = %s rad (|xi0| = %.4f, beta0 = %.3f rad), %.1f s + time to rest\n",
                     vecString(setup.start()).c_str(), spec.xi0.norm(), spec.beta0, spec.duration);
         printGains(spec, "  ");
@@ -1339,15 +1342,17 @@ int main(int argc, char** argv)
         // The lift the robot runs on: the paper's (all ones) at the operator's request on 2026-10-19, to be compared
         // with the weighted lift PandaExample::hardwareLiftWeights() (weight 10 on joint 7, which keeps joint 1 out of
         // its stick-slip regime); swap the argument to use the weighted one.
-        const PandaExample example(0.1, Vec7::Ones());
+        // One example per path (ExperimentSpec::path), each built when an experiment first needs it
+        PandaExamples examples(0.1, Vec7::Ones());
         (void)PandaExample::hardwareLiftWeights;
+        const PandaExample& example = examples.get(PathKind::Coning);
         std::printf("Lift: nearest the rest posture in the norm weighted diag%s (the paper's lift: all ones)\n",
                     vecString(example.liftWeights(), 0).c_str());
         franka::Robot robot(opt.ip, opt.noRt ? franka::RealtimeConfig::kIgnore : franka::RealtimeConfig::kEnforce);
         if (opt.command == "check")
             return cmdCheck(robot, example);
         if (opt.command == "preflight")
-            return cmdPreflight(robot, example, opt);
+            return cmdPreflight(robot, examples, opt);
         if (opt.command == "error-recovery")
             return cmdRecover(robot, opt);
         if (opt.command == "identify")
@@ -1365,9 +1370,9 @@ int main(int argc, char** argv)
             before.gains.KpBeta = PandaExample::KpBeta;
             before.gains.KdBeta = PandaExample::KdBeta;
         }
-        return cmdRun(robot, example, before, opt);
+        return cmdRun(robot, examples(before), before, opt);
 #else
-        return cmdRun(robot, example, *spec, opt);
+        return cmdRun(robot, examples(*spec), *spec, opt);
 #endif
     } catch (const franka::IncompatibleVersionException& e) {
         std::fflush(stdout);

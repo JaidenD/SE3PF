@@ -28,13 +28,47 @@ namespace se3pf {
         }
     }  // namespace
 
+    namespace {
+        std::unique_ptr<const Path> makePath(PathKind kind, const Matrix3d& R0, const Metric& W)
+        {
+            switch (kind) {
+                case PathKind::Coning:
+                    return std::make_unique<ConingCircle>(R0, PandaExample::center(), PandaExample::radius,
+                                                          PandaExample::cone, W);
+                case PathKind::Orbit:
+                    return std::make_unique<SampledPath>(inspectionOrbit(R0, InspectionOrbit()), W);
+                case PathKind::DomeEight:
+                    return std::make_unique<SampledPath>(domeFigureEight(R0, DomeFigureEight()), W);
+                case PathKind::Rail:
+                    return std::make_unique<SampledPath>(straightRail(R0, StraightRail()), W);
+            }
+            throw std::invalid_argument("PandaExample: unknown path");
+        }
+    }  // namespace
+
+    const char* toString(PathKind kind)
+    {
+        switch (kind) {
+            case PathKind::Coning: return "coning circle";
+            case PathKind::Orbit: return "inspection orbit";
+            case PathKind::DomeEight: return "dome figure-eight";
+            case PathKind::Rail: return "straight rail";
+        }
+        return "?";
+    }
+
+    PandaExample::PandaExample(double l, const Vec7& liftWeights) : PandaExample(PathKind::Coning, l, liftWeights)
+    {
+    }
+
     // Members are initialized in the order of their declaration, which is the order of the list below.
-    PandaExample::PandaExample(double l, const Vec7& liftWeights)
-        : metric_(exampleMetric(l)),
+    PandaExample::PandaExample(PathKind kind, double l, const Vec7& liftWeights)
+        : kind_(kind),
+          metric_(exampleMetric(l)),
           R0_(restAttitude()),
-          path_(R0_, center(), radius, cone, metric_),
-          tube_(path_, metric_),
-          lift_(path_, PandaArm::restPosture(), 2000, liftWeights),
+          path_(makePath(kind, R0_, metric_)),
+          tube_(*path_, metric_),
+          lift_(*path_, PandaArm::restPosture(), 2000, liftWeights),
           kernel_(lift_),
           beta_(lift_, kernel_),
           coupling_(),

@@ -8,13 +8,20 @@ the tauF columns, from before CTRL-1, still plots). The preflight's
 prediction LOG.csv.preflight.csv, which robot_driver writes next to every log, is overlaid automatically (dashed;
 --no-preflight leaves it out); --overlay adds more, e.g. the MuJoCo closed loop of the same experiment
 (out/mujoco_paper_hand.csv from experiments_mujoco). Writes FILE.png and FILE.pdf (default: next to LOG.csv) with
-  (a) |xi| and its bound 0.04;            (b) beta and its bound 0.05 rad;
-  (c) eta_dot against nu_d (velocity reference) or the tangential error eta - eta_d (position reference);
-  (d) the delivered torque |tau_i + G_i| / tau_max,i of every joint, with the 60 % bound;
-  (e) the distance of every joint to its nearer limit, with the 0.10 rad bound;
-  (f) the largest commanded |qdd*_i| / qdd_max,i and |qd_i| / qd_max,i, with the 30 % and 50 % bounds;
+  (a) the position part of xi: the flange's distance from gamma(eta), mm;
+  (b) the rotation part of xi: the flange's attitude error against gamma(eta), deg;
+  (c) |xi| and its bound 0.04;            (d) beta and its bound 0.05 rad;
+  (e) eta_dot against nu_d (velocity reference) or eta against eta_d (position reference);
+  (f) the delivered torque |tau_i + G_i| / tau_max,i of every joint, with the 60 % bound;
+  (g) the distance of every joint to its nearer limit, with the 0.10 rad bound;
+  (h) the largest commanded |qdd*_i| / qdd_max,i and |qd_i| / qd_max,i, with the 30 % and 50 % bounds;
 and prints the peaks, the safety stop (if any), the steady errors and the timing. A safety stop (phase 1: the damped
 hold at the configuration of the violation) is shaded in every panel. Needs numpy and matplotlib.
+
+Panels (a) and (b) split xi into its two halves. The pose error e_g(eta) = Log_I(gamma(eta)^-1 g) = N(eta) xi is a
+rotation vector (rad) and a position offset (m), and |xi|^2 = 0.01 |rotation|^2 + |position|^2 (W = diag(0.01 I, I)).
+Both halves come from forward kinematics of the logged q against the desired pose gamma(eta) logged with it (older
+logs: the coning circle), as in tools/plot_robot_path.py; they reproduce the logged |xi| to 1e-9.
 """
 import argparse
 import os
@@ -25,6 +32,9 @@ import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402  (after choosing the backend)
+
+from plot_robot_path import (desired_pose, fk, is_position_reference, logSO3, path_length,  # noqa: E402
+                             unwrap)
 
 # Colors as in tools/plot_mujoco.py
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#7a5cc9", "#4c4b47"]
@@ -44,6 +54,7 @@ TAU_MAX = np.array([87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0])
 JOINT_MARGIN, DQ_FRAC, DDQ_FRAC, TAU_FRAC = 0.10, 0.5, 0.3, 0.6
 TAU_RATE_MAX = 600.0
 XI_MAX, BETA_MAX = 0.04, 0.1
+W_ROT = 0.01  # the metric's rotation weight (src/panda_example.cpp): 1 rad counts as 0.1 m in |xi|
 
 
 def load(path):
@@ -59,11 +70,13 @@ def joints(d, prefix):
     return np.stack([d[f"{prefix}{i}"] for i in range(1, 8)], axis=1)
 
 
-def is_position_reference(d):
-    """A position reference holds eta_d = s0: the ref column is constant and eta_dot stays near zero."""
-    following = d["phase"] == 0
-    ref = d["ref"][following]
-    return ref.size > 0 and np.ptp(ref) < 1e-12 and ref[0] > 0.0
+def transverse_split(d):
+    """The position (m) and rotation (rad) halves of the transverse error, from the logged q and eta."""
+    R, p = fk(joints(d, "q"))
+    Rd, pd = desired_pose(d)
+    pos = np.linalg.norm(p - pd, axis=1)
+    rot = np.linalg.norm(logSO3(np.swapaxes(Rd, -1, -2) @ R), axis=1)
+    return pos, rot
 
 
 def stop_span(d):
@@ -83,6 +96,11 @@ def summary(name, d):
         print("  no following rows")
         return
     tf = t[f]
+    pos, rot = transverse_split(d)
+    mismatch = np.max(np.abs(np.sqrt(W_ROT * rot ** 2 + pos ** 2) - d["xi_norm"])[f])
+    print(f"  transverse error: position up to {1e3 * pos[f].max():.2f} mm, attitude up to "
+          f"{np.degrees(rot[f].max()):.3f} deg" + (f" (WARNING: they miss the logged |xi| by up to {mismatch:.1e}: "
+          f"not the example's path?)" if mismatch > 1e-6 else ""))
     print(f"  max |xi| {np.max(d['xi_norm'][f]):.4f} [{XI_MAX}], max |beta| {np.max(np.abs(d['beta'][f])):.4f} rad "
           f"[{BETA_MAX}], min sigma_min(A) {np.min(d['sigma_min'][f]):.4f}")
     print(f"  joint margin {margins.min():.3f} rad (joint {np.unravel_index(margins.argmin(), margins.shape)[1] + 1})"
@@ -140,7 +158,7 @@ def main():
         summary(f"prediction: {label}", d)
 
     position = is_position_reference(run)
-    fig, ax = plt.subplots(2, 3, figsize=(15, 8), constrained_layout=True)
+    fig, ax = plt.subplots(2, 4, figsize=(20, 8), constrained_layout=True)
     ax = ax.ravel()
     t = run["t"]
 
@@ -154,18 +172,33 @@ def main():
         if span:
             a.axvspan(span[0], span[1], color=STOP, alpha=0.6, linewidth=0, label="safety stop")
 
-    # (a) |xi|
-    a = ax[0]
-    styled(a, "(a) transverse error |xi|", "|xi| (metric units)")
+    # (a), (b) the position and rotation halves of xi. The dotted line is where the |xi| bound would sit if the
+    # error were all position (40 mm) or all rotation (22.9 deg); the safety check is on the combined |xi|, (c).
+    for a, k, title, ylabel, scale, bound, unit in (
+            (ax[0], 0, "(a) transverse position error |p - p_gamma(eta)|", "mm", 1e3, 1e3 * XI_MAX, "mm"),
+            (ax[1], 1, "(b) transverse attitude error |log(R_gamma(eta)^T R)|", "deg", np.degrees(1.0),
+             np.degrees(XI_MAX / np.sqrt(W_ROT)), "deg")):
+        styled(a, title, ylabel)
+        a.plot(t, scale * transverse_split(run)[k], color=SERIES[0], label="robot")
+        for j, (d, label) in enumerate(overlays):
+            a.plot(d["t"], scale * transverse_split(d)[k], "--", color=SERIES[(j + 1) % len(SERIES)], label=label)
+        a.axhline(bound, color=LIMIT, linestyle=":", label=f"|xi| bound if all {('position', 'rotation')[k]} "
+                  f"({bound:.{0 if k == 0 else 1}f} {unit})")
+        a.set_ylim(bottom=0.0)
+        a.legend(fontsize=8)
+
+    # (c) |xi|
+    a = ax[2]
+    styled(a, "(c) transverse error |xi| (both, as the safety check sees it)", "|xi| (metric units)")
     a.plot(t, run["xi_norm"], color=SERIES[0], label="robot")
     for k, (d, label) in enumerate(overlays):
         a.plot(d["t"], d["xi_norm"], "--", color=SERIES[(k + 1) % len(SERIES)], label=label)
     a.axhline(XI_MAX, color=LIMIT, linestyle=":", label="bound 0.04")
     a.legend(fontsize=8)
 
-    # (b) beta
-    a = ax[1]
-    styled(a, "(b) redundancy output beta", "beta (rad)")
+    # (d) beta
+    a = ax[3]
+    styled(a, "(d) redundancy output beta", "beta (rad)")
     a.plot(t, run["beta"], color=SERIES[0], label="robot")
     for k, (d, label) in enumerate(overlays):
         a.plot(d["t"], d["beta"], "--", color=SERIES[(k + 1) % len(SERIES)], label=label)
@@ -173,15 +206,21 @@ def main():
         a.axhline(s * BETA_MAX, color=LIMIT, linestyle=":", label="bound 0.05 rad" if s > 0 else None)
     a.legend(fontsize=8)
 
-    # (c) tangential channel
-    a = ax[2]
+    # (e) tangential channel
+    a = ax[4]
     if position:
-        styled(a, "(c) tangential error eta - eta_d", "e_eta (metric units)")
-        a.plot(t, run["e_tan"], color=SERIES[0], label="robot")
+        styled(a, "(e) path position eta against eta_d", "eta (metric units)")
+        def eta_on_ref(d):  # eta unwrapped and started on eta_d's side (eta wraps at L, eta_d does not)
+            Ld = path_length(d)
+            ue = unwrap(d["eta"], Ld)
+            return ue if Ld is None else ue + Ld * np.round((d["ref"][0] - ue[0]) / Ld)
+        a.plot(t, eta_on_ref(run), color=SERIES[0], label="robot")
         for k, (d, label) in enumerate(overlays):
-            a.plot(d["t"], d["e_tan"], "--", color=SERIES[(k + 1) % len(SERIES)], label=label)
+            a.plot(d["t"], eta_on_ref(d), "--", color=SERIES[(k + 1) % len(SERIES)], label=label)
+        f = run["phase"] == 0
+        a.plot(t[f], run["ref"][f], ":", color=REFERENCE, label="eta_d")
     else:
-        styled(a, "(c) path speed eta_dot against nu_d", "eta_dot (metric units / s)")
+        styled(a, "(e) path speed eta_dot against nu_d", "eta_dot (metric units / s)")
         a.plot(t, run["eta_dot"], color=SERIES[0], label="robot")
         for k, (d, label) in enumerate(overlays):
             a.plot(d["t"], d["eta_dot"], "--", color=SERIES[(k + 1) % len(SERIES)], label=label)
@@ -189,18 +228,18 @@ def main():
         a.plot(t[f], run["ref"][f], ":", color=REFERENCE, label="nu_d")
     a.legend(fontsize=8)
 
-    # (d) delivered torques
-    a = ax[3]
-    styled(a, "(d) delivered torque |tau_i + G_i| / tau_max,i", "fraction of the limit")
+    # (f) delivered torques
+    a = ax[5]
+    styled(a, "(f) delivered torque |tau_i + G_i| / tau_max,i", "fraction of the limit")
     frac = np.abs(joints(run, "tauG")) / TAU_MAX
     for i in range(7):
         a.plot(t, frac[:, i], color=SERIES[i], linewidth=1.0, label=f"joint {i + 1}")
     a.axhline(TAU_FRAC, color=LIMIT, linestyle=":", label="bound 60 %")
     a.legend(fontsize=7, ncol=2)
 
-    # (e) joint margins
-    a = ax[4]
-    styled(a, "(e) distance of each joint to its nearer limit", "rad")
+    # (g) joint margins
+    a = ax[6]
+    styled(a, "(g) distance of each joint to its nearer limit", "rad")
     q = joints(run, "q")
     margins = np.minimum(q - Q_MIN, Q_MAX - q)
     for i in range(7):
@@ -208,9 +247,9 @@ def main():
     a.axhline(JOINT_MARGIN, color=LIMIT, linestyle=":", label="bound 0.10 rad")
     a.legend(fontsize=7, ncol=2)
 
-    # (f) velocity and commanded acceleration
-    a = ax[5]
-    styled(a, "(f) max |qd_i|/qd_max,i and commanded |qdd*_i|/qdd_max,i", "fraction of the limit")
+    # (h) velocity and commanded acceleration
+    a = ax[7]
+    styled(a, "(h) max |qd_i|/qd_max,i and commanded |qdd*_i|/qdd_max,i", "fraction of the limit")
     a.plot(t, (np.abs(joints(run, "dq")) / DQ_MAX).max(axis=1), color=SERIES[0], label="|qd| (robot)")
     a.plot(t, (np.abs(joints(run, "qdd")) / DDQ_MAX).max(axis=1), color=SERIES[1], label="|qdd*| (robot)")
     for k, (d, label) in enumerate(overlays):

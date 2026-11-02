@@ -61,6 +61,13 @@ namespace {
             double m_;
     };
 
+    // The example an experiment runs on: the test program's coning-circle example, or one per other path
+    const PandaExample& exampleFor(const ExperimentSpec& e)
+    {
+        static PandaExamples others;
+        return e.path == PathKind::Coning ? pandaExample() : others(e);
+    }
+
     const ExperimentSpec& spec(const char* name)
     {
         const ExperimentSpec* e = findExperiment(name);
@@ -93,9 +100,11 @@ namespace {
 TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is valid and never loosens a margin")
 {
     const std::vector<ExperimentSpec>& all = experiments();
-    REQUIRE(all.size() == 8);
-    const char* order[] = {"hold", "loops", "loops-integral", "loops-friction", "loops-inertia", "recover", "paper", "self-motion"};
-    for (int i = 0; i < 8; ++i) {
+    REQUIRE(all.size() == 19);
+    const char* order[] = {"hold", "loops", "loops-integral", "loops-friction", "loops-inertia", "loops-pid", "loops-pid-hi", "recover", "paper", "self-motion",
+                           "orbit-velocity", "orbit-position", "dome-velocity", "dome-position", "dome-velocity-lo",
+                           "orbit-selfmotion-hold", "orbit-selfmotion-moving", "rail-damper", "rail-spring"};
+    for (int i = 0; i < 19; ++i) {
         CAPTURE(i);
         CHECK(all[i].name == order[i]);
         CHECK(findExperiment(order[i]) == &all[i]);
@@ -112,18 +121,28 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
         CHECK_FALSE(SafetyMonitor(e.limits).clamped());
         // Starts inside the tube and redundancy margins, with room to spare
         CHECK(e.xi0.norm() <= 0.8 * B::xi);
-        CHECK(std::abs(e.beta0) <= 0.04);
+        // (the self-motion demos on the orbit start at 0.5 rad: they need a beta bound above that)
+        const bool selfMotionDemo = e.name.find("selfmotion") != std::string::npos;
+        const bool railRun = e.path == PathKind::Rail;  // pushed by hand: no integrals, tight limits
+        CHECK(std::abs(e.beta0) <= (selfMotionDemo ? 0.5 : 0.04));
         // The mu ramp (Rules for the 1 kHz loop: hardware only, T = 1-2 s)
         CHECK(e.rampTime >= 1.0);
         CHECK(e.rampTime <= 2.0);
         // The paper's poles at -4 and k_t = 5, except loops: poles at -6 and k_t = 10 (CTRL-1, 2026-10-19)
         const bool loopsLike = e.name == "loops" || e.name == "loops-integral" || e.name == "loops-friction"
-                               || e.name == "loops-inertia";
-        const double lambda = loopsLike ? 6.0 : 4.0;
-        CHECK(e.gains.Kp == lambda * lambda);
-        CHECK(e.gains.Kd == 2.0 * lambda);
-        CHECK(e.gains.KpBeta == lambda * lambda);
-        CHECK(e.gains.KdBeta == 2.0 * lambda);
+                               || e.name == "loops-inertia" || e.name == "loops-pid"
+                               || e.name == "loops-pid-hi";
+        // The paper's paths (2026-11-02): the controller of loops-pid on the orbit and the dome
+        const bool pathRun = e.path != PathKind::Coning;
+        CHECK(pathRun == (e.name.rfind("orbit-", 0) == 0 || e.name.rfind("dome-", 0) == 0
+                          || e.name.rfind("rail-", 0) == 0));
+        const bool paperGains = e.name == "dome-velocity-lo";  // the paper's gains on the dome (2026-11-02)
+        const double lambda = ((loopsLike || pathRun) && !paperGains) ? 6.0 : 4.0;
+        const bool stiffXi = selfMotionDemo || railRun;  // transverse poles at -8, beta at -4
+        CHECK(e.gains.Kp == (stiffXi ? 64.0 : lambda * lambda));
+        CHECK(e.gains.Kd == (stiffXi ? 16.0 : 2.0 * lambda));
+        CHECK(e.gains.KpBeta == (stiffXi ? 16.0 : lambda * lambda));
+        CHECK(e.gains.KdBeta == (stiffXi ? 8.0 : 2.0 * lambda));
         // Integral action only in loops (CTRL-1)
         if (e.name == "loops-friction" || e.name == "loops-inertia") {
             CHECK(e.gains.kiEta == 0.0);
@@ -136,7 +155,48 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
                 CHECK(maxDiff(e.friction.coulomb, (Vec7() << 0.65, 0.40, 0.20, 0.30, 0.60, 0.30, 0.35).finished()) == 0.0);
                 CHECK(e.friction.viscous.isZero());
             }
+        } else if (railRun) {
+            CHECK(e.gains.kiEta == 0.0);
+            CHECK(e.gains.Ki == 0.0);
+            CHECK(e.gains.KiBeta == 0.0);
+            CHECK(e.limits.xi == 0.03);
+            CHECK(e.limits.flangeSpeed == 0.15);
+            CHECK(e.limits.beta == 0.1);
+            CHECK_FALSE(e.friction.active());
+            if (e.mode == TangentialReference::Mode::Velocity) {
+                CHECK(e.speed.nuMax == 0.0);  // nothing drives eta: mu_eta = -k_t eta_dot
+                CHECK(e.gains.kt == 15.0);
+            } else {
+                CHECK_FALSE(e.stations.active());  // eta_d = s0: a spring back to the start
+                CHECK(e.gains.kpEta == 16.0);
+                CHECK(e.gains.kdEta == 8.0);
+            }
+        } else if (pathRun) {
+            CHECK(e.gains.kiEta == (paperGains ? 6.0 : 25.0));
+            CHECK(e.gains.Ki == (selfMotionDemo ? 64.0 : paperGains ? 16.0 : 36.0));
+            CHECK(e.gains.KiBeta == ((selfMotionDemo || paperGains) ? 16.0 : 36.0));
+            if (selfMotionDemo)
+                CHECK(e.gains.integralMaxBeta == 1.5);
+            CHECK(e.gains.kpEta == (paperGains ? 16.0 : 36.0));
+            CHECK(e.gains.kdEta == (paperGains ? 8.0 : 12.0));
+            CHECK_FALSE(e.friction.active());
+            CHECK(maxDiff(e.rotorInertia, (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished()) == 0.0);
+            CHECK(e.stations.active() == (e.mode == TangentialReference::Mode::Position && !selfMotionDemo));
+            if (e.stations.active()) {
+                CHECK(e.stations.count == 6);
+                CHECK(e.stations.peakSpeed() <= 0.0601);
+                CHECK(e.stations.end() <= e.duration);
+            }
+        } else if (e.name == "loops-pid-hi") {  // stiffer tangential loop (loops_pid_1, 2026-11-02)
+            CHECK(e.gains.kiEta == 100.0);
+            CHECK(e.gains.integralMaxEta == 2.0);
+            CHECK(e.gains.Ki == 36.0);
+            CHECK(e.gains.KiBeta == 36.0);
         } else if (loopsLike) {
+            if (e.name == "loops-pid" || e.name == "loops-pid-hi") {  // the integral action of loops, the measured inertia, no friction model
+                CHECK_FALSE(e.friction.active());
+                CHECK(maxDiff(e.rotorInertia, (Vec7() << 1.0, 1.0, 1.0, 1.0, 0.13, 0.12, 0.10).finished()) == 0.0);
+            }
             CHECK(e.gains.kiEta == 25.0);
             CHECK(e.gains.Ki == 36.0);
             CHECK(e.gains.KiBeta == 36.0);
@@ -148,8 +208,8 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
             CHECK(e.gains.Ki == 0.0);
             CHECK(e.gains.KiBeta == 0.0);
         }
-        if (e.mode == TangentialReference::Mode::Velocity) {
-            CHECK(e.gains.kt == (loopsLike ? 15.0 : 5.0));
+        if (e.mode == TangentialReference::Mode::Velocity && !railRun) {
+            CHECK(e.gains.kt == (e.name == "loops-pid-hi" ? 30.0 : paperGains ? 5.0 : (loopsLike || pathRun) ? 15.0 : 5.0));
             CHECK(e.speed.end() <= e.duration);
             CHECK(e.speed.rampUp >= 2.0);  // smooth start
             CHECK(e.speed.rampDown >= 4.0);  // ends at rest
@@ -201,9 +261,72 @@ TEST_CASE("experiments: the catalog, in the order the lab runs it; each spec is 
     // The rotor inertia: 0.3 kg m^2 on the wrist of loops, none elsewhere
     for (const ExperimentSpec& e : all) {
         CAPTURE(e.name);
-        CHECK(e.rotorInertia.isZero() == (e.name != "loops" && e.name != "loops-friction" && e.name != "loops-inertia"));
+        CHECK(e.rotorInertia.isZero() == (e.name != "loops" && e.name != "loops-friction" && e.name != "loops-inertia"
+                                         && e.name != "loops-pid" && e.name != "loops-pid-hi"
+                                         && e.path == PathKind::Coning));
     }
     CHECK(maxDiff(spec("loops").rotorInertia, (Vec7() << 0, 0, 0, 0, 0.5, 0.5, 0.5).finished()) == 0.0);
+}
+
+TEST_CASE("experiments on the paper's paths: the L of the catalog is the example's, two loops or one in six stations")
+{
+    PandaExamples examples;
+    for (const char* name : {"orbit-velocity", "orbit-position", "dome-velocity", "dome-position", "dome-velocity-lo"}) {
+        CAPTURE(name);
+        const ExperimentSpec& e = spec(name);
+        const PandaExample& ex = examples(e);
+        REQUIRE(ex.pathKind() == e.path);
+        const double L = ex.tube().length();
+        if (e.mode == TangentialReference::Mode::Velocity)
+            CHECK(std::abs(e.speed.distance() - 2.0 * L) < 1e-3);
+        else
+            CHECK(std::abs(e.stations.count * e.stations.step - L) < 1e-3);
+        const ExperimentSetup setup(ex, e);  // a start exists
+        CHECK(setup.start().allFinite());
+    }
+    // An example on another path is refused
+    CHECK_THROWS_AS(ExperimentSetup(examples.get(PathKind::Coning), spec("orbit-velocity")), std::invalid_argument);
+}
+
+TEST_CASE("StationSchedule: waits, moves by step with a smooth profile, stops; continuous rate and acceleration")
+{
+    StationSchedule st;
+    double e = 1.0, de = 1.0, dde = 1.0;
+    st.eval(5.0, e, de, dde);  // no stations: zero
+    CHECK(e == 0.0);
+    CHECK(de == 0.0);
+    st.count = 3;
+    st.step = 0.2;
+    st.moveTime = 4.0;
+    st.dwell = 2.0;
+    st.firstDwell = 1.0;
+    CHECK(st.end() == 19.0);
+    CHECK(std::abs(st.peakSpeed() - 1.875 * 0.2 / 4.0) < 1e-15);
+    st.eval(0.5, e, de, dde);
+    CHECK(e == 0.0);
+    st.eval(3.0, e, de, dde);  // half way through the first move
+    CHECK(std::abs(e - 0.1) < 1e-15);
+    CHECK(std::abs(de - st.peakSpeed()) < 1e-12);
+    st.eval(6.0, e, de, dde);  // dwelling at the first station
+    CHECK(std::abs(e - 0.2) < 1e-15);
+    CHECK(de == 0.0);
+    st.eval(100.0, e, de, dde);  // after the last
+    CHECK(std::abs(e - 0.6) < 1e-15);
+    // de and dde are the derivatives of e, and continuous
+    const double h = 1e-6;
+    double prevDe = 0.0, prevDde = 0.0;
+    for (double t = 0.0; t < 20.0; t += 0.01) {
+        double e1, d1, a1, e2, d2, a2;
+        st.eval(t - h, e1, d1, a1);
+        st.eval(t + h, e2, d2, a2);
+        st.eval(t, e, de, dde);
+        CHECK(std::abs((e2 - e1) / (2 * h) - de) < 1e-6);
+        CHECK(std::abs((d2 - d1) / (2 * h) - dde) < 1e-4);
+        CHECK(std::abs(de - prevDe) < 0.01);
+        CHECK(std::abs(dde - prevDde) < 0.01);
+        prevDe = de;
+        prevDde = dde;
+    }
 }
 
 TEST_CASE("SpeedProfile: values, an exact time derivative, continuity at the joints, zero outside")
@@ -593,7 +716,7 @@ TEST_CASE("ExperimentSetup: the start has the experiment's outputs; the controll
     const PandaExample& ex = pandaExample();
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         CHECK(s.s0() == 0.1);
         CHECK(s.duration() == e.duration);
         CHECK(s.timeout() == e.duration + 5.0);
@@ -603,20 +726,23 @@ TEST_CASE("ExperimentSetup: the start has the experiment's outputs; the controll
         CHECK(c.gains().Kp == e.gains.Kp);
         CHECK(c.gains().kdEta == e.gains.kdEta);
         CHECK(c.reference().mode == e.mode);
-        CHECK(c.redundancy() == &ex.redundancy());
+        CHECK(c.redundancy() == &exampleFor(e).redundancy());
         Controller<PandaArm>::OutputState out;
         REQUIRE(c.outputs(s.start(), 0.1, out));
         CHECK_THAT(out.eta, WithinAbs(0.1, 1e-10));
         CHECK(maxDiff(out.xi, e.xi0) < 1e-10);
         CHECK_THAT(out.beta, WithinAbs(e.beta0, 1e-10));
-        // The reference: eta_d = s0 (position), or the speed profile
+        // The reference: eta_d = s0 plus the stations, if any (position), or the speed profile
         double ref = 0.0, d1 = 0.0, d2 = 0.0;
         const TangentialReference r = s.reference();
         if (e.mode == TangentialReference::Mode::Position) {
             r.position(3.0, ref, d1, d2);
-            CHECK(ref == 0.1);
-            CHECK(d1 == 0.0);
-            CHECK(d2 == 0.0);
+            double se = 0.0, sd1 = 0.0, sd2 = 0.0;
+            e.stations.eval(3.0, se, sd1, sd2);
+            CHECK(ref == 0.1 + se);
+            CHECK(d1 == sd1);
+            CHECK(d2 == sd2);
+            CHECK(s.referenceSpeed(3.0) == sd1);
         } else {
             double nu = 0.0, dnu = 0.0;
             e.speed.eval(5.0, nu, dnu);
@@ -860,7 +986,7 @@ TEST_CASE("preflight: every experiment passes, kinematic only; the peaks of the 
     const PandaExample& ex = pandaExample();
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         std::vector<ExperimentLogRow> log;
         const PreflightReport r = preflight(s, nullptr, s.monitor(), &log);
         INFO(r.summary());
@@ -912,11 +1038,17 @@ TEST_CASE("preflight: every experiment passes on the hardware lift (the robot dr
 {
     // The driver builds the example with PandaExample::hardwareLiftWeights(); the preflight of every experiment
     // must pass on it too, kinematic only and with the test model, with the same margins as on the paper's lift
-    const PandaExample hw(0.1, PandaExample::hardwareLiftWeights());
+    PandaExamples hw(0.1, PandaExample::hardwareLiftWeights());
     const FakeDynamics dyn;
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const ExperimentSetup s(hw, e);
+        if (e.path == PathKind::DomeEight) {
+            // The dome's twist about the tool axis (+-46 deg) needs joint 7; with the weight 10 on it the lift
+            // finds no configuration part way round (2026-11-02). The driver runs the unweighted lift.
+            CHECK_THROWS_AS(hw(e), std::runtime_error);
+            continue;
+        }
+        const ExperimentSetup s(hw(e), e);
         for (const DynamicsModel* model : {static_cast<const DynamicsModel*>(nullptr), static_cast<const DynamicsModel*>(&dyn)}) {
             const PreflightReport r = preflight(s, model, s.monitor());
             INFO(r.summary());
@@ -927,7 +1059,7 @@ TEST_CASE("preflight: every experiment passes on the hardware lift (the robot dr
     }
     // loops on the hardware lift: joint 1 moves (the point of the lift), still far inside its limits
     std::vector<ExperimentLogRow> log;
-    const ExperimentSetup loops(hw, spec("loops"));
+    const ExperimentSetup loops(hw(spec("loops")), spec("loops"));
     REQUIRE(preflight(loops, nullptr, loops.monitor(), &log).ok);
     double maxDq1 = 0.0;
     for (const ExperimentLogRow& row : log)
@@ -943,7 +1075,7 @@ TEST_CASE("preflight: every experiment passes with a dynamics model; the torques
     const FakeDynamics dyn;
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         std::vector<ExperimentLogRow> log;
         const PreflightReport r = preflight(s, &dyn, s.monitor(), &log);
         INFO(r.summary());
@@ -974,7 +1106,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("paper");
         e.xi0 = 1.5 * PandaExample::xi0();  // |xi0| = 0.047 > 0.04
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Tube);
@@ -986,7 +1118,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("self-motion");
         e.beta0 = 0.12;
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Redundancy);
@@ -996,7 +1128,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("paper");
         e.gains = Gains::fromLambda(30.0);
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Acceleration);
@@ -1007,7 +1139,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("paper");
         e.rampTime = 0.0;
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         std::vector<ExperimentLogRow> log;
         const PreflightReport r = preflight(s, nullptr, s.monitor(), &log);
         CHECK_FALSE(r.ok);
@@ -1027,7 +1159,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
     {
         ExperimentSpec e = spec("recover");
         e.rampTime = 0.0;  // the first command, 25 % of an acceleration limit, passes; its torque jumps from 0
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const ScaledInertia dyn(0.5);
         const PreflightReport r = preflight(s, &dyn, s.monitor());
         CHECK_FALSE(r.ok);
@@ -1052,7 +1184,7 @@ TEST_CASE("preflight: a bad experiment fails with the right reason, at the right
         e.gains.kt = 0.01;                // ... and the tangential law takes 100 s to brake
         e.gains.kiEta = 0.0;              // (without the integral action, which would brake it)
         e.duration = 3.0;
-        const ExperimentSetup s(ex, e);
+        const ExperimentSetup s(exampleFor(e), e);
         const PreflightReport r = preflight(s, nullptr, s.monitor());
         CHECK_FALSE(r.ok);
         CHECK(r.violation == Violation::Timeout);

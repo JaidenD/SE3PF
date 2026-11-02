@@ -10,7 +10,8 @@
 //   feedforward tau_f, part of tau; CTRL-1), tauJ1..tauJ7 (driver only: the measured link-side torque tau_J of the
 //   robot state, gravity included, to compare with tauG), int_eta, int_xi, int_beta (the integral terms in mu, |.|
 //   of the xi one; CTRL-1), compute_us, period_ms, success_rate (the last three are the driver's: time spent in the
-//   callback, libfranka's period, and the robot's control_command_success_rate; 0 in predictions, as tauJ).
+//   callback, libfranka's period, and the robot's control_command_success_rate; 0 in predictions, as tauJ),
+//   gx, gy, gz, grx, gry, grz (the desired pose gamma(eta): position, m, and rotation vector, rad; 2026-11-02).
 #include "se3pf/experiments.hpp"
 #include "se3pf/identify.hpp"
 
@@ -28,7 +29,7 @@ namespace se3pf::robot {
         for (const char* name : {"q", "dq", "tau", "tauG", "qdd", "tauF", "tauJ"})
             for (int i = 1; i <= 7; ++i)
                 os << ',' << name << i;
-        os << ",int_eta,int_xi,int_beta,compute_us,period_ms,success_rate\n";
+        os << ",int_eta,int_xi,int_beta,compute_us,period_ms,success_rate,gx,gy,gz,grx,gry,grz\n";
     }
 
     inline void writeLogRow(std::ostream& os, const ExperimentLogRow& r)
@@ -42,7 +43,10 @@ namespace se3pf::robot {
             for (int i = 0; i < 7; ++i)
                 os << ',' << (*v)[i];
         os << ',' << r.iEta << ',' << r.iXi << ',' << r.iBeta << ',' << r.computeUs << ',' << r.periodMs << ','
-           << r.successRate << '\n';
+           << r.successRate;
+        for (int i = 0; i < 6; ++i)
+            os << ',' << r.gamma[i];
+        os << '\n';
     }
 
     // Writes rows [0, count) to path; false if the file cannot be written.
