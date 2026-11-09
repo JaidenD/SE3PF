@@ -2,13 +2,16 @@
 // a separate process (robot_driver_mock), as the operator runs robot_driver on the lab PC: every experiment with
 // --yes (the mock-only option that answers the prompts), the operator's answers through standard input, faults
 // injected into the simulated robot through the mock's environment variables (mock/franka/README.md), every kind of
-// violation through the driver's safety stop (--inject, mock only), and the driver's refusals. Checks the exit codes,
-// the output and the CSV logs. A separate test program (tests_sil); the runs take about 30 s in all in Release.
+// violation through the driver's safety stop (--inject, mock only), the friction feedforward against a plant with
+// Coulomb friction (CTRL-1), and the driver's refusals. Checks the exit codes, the output and the CSV logs. A
+// separate test program (tests_sil); the runs take about 45 s in all in Release.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "se3pf/experiments.hpp"
+#include "se3pf/identify.hpp"
 #include "se3pf/panda.hpp"
 #include "test_helpers.hpp"
+#include "franka/mock_arm.h"  // the mock's toy arm, for the expected inertia
 
 #include <sys/wait.h>
 #include <unistd.h>  // getpid
@@ -121,6 +124,59 @@ namespace {
     std::string logArg(const std::string& name) { return "--log=" + (workDir() / (name + ".csv")).string(); }
     fs::path logPath(const std::string& name) { return workDir() / (name + ".csv"); }
 
+    std::string csv7(const Vec7& v)
+    {
+        std::string s;
+        for (int i = 0; i < 7; ++i)
+            s += (i ? "," : "") + std::to_string(v[i]);
+        return s;
+    }
+    // FRANKA_MOCK_COULOMB=c1,...,c7: the plant's Coulomb friction, e.g. what an experiment's feedforward compensates
+    std::string coulombEnv(const Vec7& c) { return "FRANKA_MOCK_COULOMB=" + csv7(c); }
+    // The plant of an experiment: the Coulomb friction its feedforward compensates and the rotor inertia its
+    // command assumes (what the robot has and franka::Model does not)
+    std::string plantEnv(const ExperimentSpec& e)
+    {
+        return coulombEnv(e.friction.coulomb) + " FRANKA_MOCK_FRICTION=" + csv7(e.friction.viscous)
+               + " FRANKA_MOCK_ROTOR=" + csv7(e.rotorInertia);
+    }
+    // tau_f stays within Fc + Fv |v|; the lift's joint speeds at nu_d are below 0.25 rad/s
+    Vec7 tauFBound(const ExperimentSpec& e) { return e.friction.coulomb + 0.25 * e.friction.viscous; }
+
+    // Mean eta_dot over the cruise of a velocity reference (rows with ref at its maximum), and the mean |dq_i|
+    // there; NaN without such rows
+    struct Cruise {
+        double etaDot = std::nan("");
+        Vec7 meanAbsDq = Vec7::Constant(std::nan(""));
+        double maxXi = 0.0, maxBeta = 0.0;  // over every following row
+    };
+    Cruise cruiseOf(const Csv& log)
+    {
+        Cruise c;
+        double nuMax = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k)
+            nuMax = std::max(nuMax, log.at(k, "ref"));
+        double sum = 0.0;
+        Vec7 dqSum = Vec7::Zero();
+        long n = 0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            if (log.at(k, "phase") != 0.0)
+                continue;
+            c.maxXi = std::max(c.maxXi, log.at(k, "xi_norm"));
+            c.maxBeta = std::max(c.maxBeta, std::abs(log.at(k, "beta")));
+            if (nuMax > 0.0 && log.at(k, "ref") >= 0.999 * nuMax) {
+                sum += log.at(k, "eta_dot");
+                dqSum += log.vec(k, "dq").cwiseAbs();
+                ++n;
+            }
+        }
+        if (n > 0) {
+            c.etaDot = sum / n;
+            c.meanAbsDq = dqSum / n;
+        }
+        return c;
+    }
+
     // The first row of the safety stop (phase 1), or rows.size()
     std::size_t firstStopRow(const Csv& log)
     {
@@ -172,6 +228,8 @@ TEST_CASE("robot_driver_mock: list, usage errors, unknown experiments")
     CHECK(run("0.0.0.0 hold --yes --inject=bogus@1").code == 1);
     CHECK(run("0.0.0.0 hold --yes --inject=tube").code == 1);
     CHECK(run("0.0.0.0 hold --yes --inject=tube@x").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --before-ctrl1=1").code == 1);
+    CHECK(run("0.0.0.0 hold --yes --before-ctrl1x").code == 1);
     CHECK(run("0.0.0.0 no-such-experiment --yes").code == 2);
     CHECK(run("0.0.0.0 preflight no-such-experiment").code == 2);
 }
@@ -208,7 +266,10 @@ TEST_CASE("robot_driver_mock: every experiment end to end: approach, torque loop
 {
     for (const ExperimentSpec& e : experiments()) {
         CAPTURE(e.name);
-        const Run r = run("0.0.0.0 " + e.name + " --yes " + logArg(e.name));
+        // The simulated robot has the Coulomb friction the experiment's feedforward compensates (loops: Gaz et
+        // al. 2019 with joint 6 raised; the others: none)
+        const bool friction = e.friction.active();
+        const Run r = run("0.0.0.0 " + e.name + " --yes " + logArg(e.name), plantEnv(e));
         INFO(r.out);
         REQUIRE(r.code == 0);
         CHECK(r.contains("Approach done"));
@@ -234,16 +295,46 @@ TEST_CASE("robot_driver_mock: every experiment end to end: approach, torque loop
                 maxXiDiff = std::max(maxXiDiff, std::abs(log.at(k, "xi_norm") - pred.at(k, "xi_norm")));
         }
         // The simulated robot follows the prediction (from the measured start): the differences are the low-pass
-        // filter of the torque command and the torque held over each period
+        // filter of the torque command and the torque held over each period. With Coulomb friction in the plant
+        // (loops) the feedforward cancels it while a joint moves, not while it sticks (the start, each reversal of
+        // a joint of the lift), which the frictionless prediction does not see: |xi| 2e-3, |beta| 6e-3, well inside
+        // the experiment's pass criteria (2e-2, 3e-2), and a small error stays at rest (static friction holds it,
+        // as the robot's did in 'hold').
         CAPTURE(maxXiDiff, maxXi, maxBeta);
-        CHECK(maxXiDiff < 1e-4);  // paper: 2.9e-5, the O(dt) of MuJoCo run B (3.4e-5)
+        CHECK(maxXiDiff < (friction ? 5e-3 : 1e-4));  // paper: 2.9e-5, the O(dt) of MuJoCo run B (3.4e-5)
         CHECK(maxXi <= HardwareBounds::xi);
-        CHECK(maxBeta <= std::max(1e-3, std::abs(e.beta0) + 1e-4));
+        CHECK(maxBeta <= (friction ? 1e-2 : std::max(1e-3, std::abs(e.beta0) + 1e-4)));
         CHECK(log.at(last, "xi_norm") < 1e-3);
-        CHECK(std::abs(log.at(last, "beta")) < 1e-3);
-        // Two loops: the arm ends where it started
+        CHECK(std::abs(log.at(last, "beta")) < (friction ? 5e-3 : 1e-3));
+        // Two loops: the arm ends where it started (with friction, a little short along the path: eta_dot lags
+        // nu_d by about 1 %, so the end is a few hundredths of a radian before the start, on the lift)
         if (e.name == "loops") {
-            CHECK(testing::maxDiff(log.vec(last, "q"), log.vec(0, "q")) < 2e-3);
+            if (friction)
+                CHECK(std::abs(testing::arcDiff(log.at(last, "eta"), 0.1, 0.77008765)) < 0.05);
+            else
+                CHECK(testing::maxDiff(log.vec(last, "q"), log.vec(0, "q")) < 2e-3);
+        }
+        // The measured link-side torque tau_J is logged (the mock reports its last command plus G): close to tauG
+        double maxTauJGap = 0.0;
+        for (std::size_t k = 100; k < log.rows.size(); ++k)
+            maxTauJGap = std::max(maxTauJGap, testing::maxDiff(log.vec(k, "tauJ"), log.vec(k, "tauG")));
+        CAPTURE(maxTauJGap);
+        CHECK(maxTauJGap < 0.5);
+        CHECK(log.vec(last, "tauJ").cwiseAbs().maxCoeff() > 1.0);  // gravity on joints 2 and 4
+        // The friction feedforward in the log: zero at the first cycle, never above Fc + Fv |v|, part of tau
+        if (friction) {
+            const Vec7 fc = e.friction.coulomb;
+            CHECK(log.vec(0, "tauF").isZero());
+            double maxTauF = 0.0;
+            for (std::size_t k = 0; k < log.rows.size(); ++k) {
+                const Vec7 tauF = log.vec(k, "tauF");
+                CHECK((tauF.cwiseAbs().array() <= tauFBound(e).array() + 1e-9).all());
+                maxTauF = std::max(maxTauF, tauF.cwiseAbs().maxCoeff());
+            }
+            CHECK(maxTauF > 0.9 * fc.maxCoeff());
+            CHECK(r.contains("friction feedforward tau_f"));
+        } else {
+            CHECK(r.contains("friction feedforward: off"));
         }
     }
 }
@@ -397,6 +488,184 @@ TEST_CASE("robot_driver_mock: joint friction (1 N m s/rad, as MuJoCo run C) leav
     CHECK(minEtaDot < 0.079);  // the path speed lags nu_d = 0.08 (no integral action: CTRL-1)
 }
 
+TEST_CASE("robot_driver_mock: Coulomb friction (the stall of 2026-10-19, CTRL-1): loops stalls without the friction "
+          "feedforward and completes with it",
+          SLOW_IN_DEBUG)
+{
+    const ExperimentSpec& loops = *findExperiment("loops");
+    REQUIRE(loops.friction.active());
+    const Vec7 fc = loops.friction.coulomb;  // Gaz et al. 2019, joint 6 raised
+    const double nuD = loops.speed.nuMax;
+
+    // 1. The stall of loops_1: the plant with the Coulomb levels of Gaz et al. 2019 and the controller as it ran
+    // then (--before-ctrl1, mock only: the paper's gains, no feedforward, franka::Model's M alone). As on the robot
+    // (logs/loops_1.csv: eta_dot 1 % of nu_d while cruising, |xi| 0.018, beta 0.030, the wrist never moving under a
+    // commanded torque below its friction), the arm stays put: no reflex, no stop, "finished at rest" with the
+    // errors frozen.
+    {
+        const Vec7 plant = FrictionFeedforward::gaz2019().coulomb;
+        const Run r = run("0.0.0.0 loops --yes --before-ctrl1 " + logArg("stall"), coulombEnv(plant));
+        INFO(r.out);
+        CHECK(r.code == 0);
+        CHECK(r.contains("friction feedforward: off"));
+        CHECK_FALSE(r.contains("SAFETY STOP"));
+        CHECK_FALSE(r.contains("REFLEX"));
+        const Csv log = readCsv(logPath("stall"));
+        REQUIRE(log.rows.size() > 30000);
+        const Cruise c = cruiseOf(log);
+        CAPTURE(c.etaDot, c.maxXi, c.maxBeta, c.meanAbsDq.transpose());
+        CHECK(c.etaDot < 0.15 * nuD);      // 7 % here, 1 % on the robot
+        CHECK(c.maxBeta > 0.03);           // 0.049 here, 0.030 on the robot
+        CHECK(c.maxBeta <= HardwareBounds::beta);
+        CHECK(c.maxXi > 0.01);             // 0.019 here, 0.018 on the robot
+        for (int i : {0, 4, 6})            // joints 1, 5 and 7 never move
+            CHECK(c.meanAbsDq[i] < 1e-3);
+        // The commanded torque on the stuck wrist joints stays below their Coulomb level while qdd* asks for more
+        // than 10 % of their acceleration limit: the controller cannot break them free
+        double maxTau5 = 0.0, maxTau7 = 0.0, maxDdq = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            const Vec7 tau = log.vec(k, "tau").cwiseAbs();
+            maxTau5 = std::max(maxTau5, tau[4]);
+            maxTau7 = std::max(maxTau7, tau[6]);
+            maxDdq = std::max(maxDdq, log.vec(k, "qdd").cwiseAbs().cwiseQuotient(PandaArm::ddqMax()).maxCoeff());
+        }
+        CAPTURE(maxTau5, maxTau7, maxDdq);
+        CHECK(maxTau5 < plant[4]);
+        CHECK(maxTau7 < plant[6]);
+        CHECK(maxDdq > 0.10);
+    }
+    // 2. The plant with exactly the friction and rotor inertia the spec assumes, with the controller before CTRL-1
+    // and with the spec's
+    {
+        const Run off = run("0.0.0.0 loops --yes --before-ctrl1 " + logArg("coulomb_off"), plantEnv(loops));
+        INFO(off.out);
+        CHECK(off.code == 0);
+        CHECK_FALSE(off.contains("REFLEX"));
+        const Cruise c = cruiseOf(readCsv(logPath("coulomb_off")));
+        CAPTURE(c.etaDot, c.maxXi, c.maxBeta);
+        CHECK(c.etaDot < 0.5 * nuD);   // 28 %: the arm lags far behind the reference ...
+        CHECK(c.maxBeta > 0.02);       // ... and |beta| 0.040 reaches what the robot showed (0.030)
+        CHECK(c.maxXi > 5e-3);
+
+        const Run on = run("0.0.0.0 loops --yes " + logArg("coulomb_on"), plantEnv(loops));
+        INFO(on.out);
+        CHECK(on.code == 0);
+        CHECK(on.contains("Finished at rest."));
+        CHECK_FALSE(on.contains("SAFETY STOP"));
+        CHECK(on.contains("callback allocations: 0"));
+        CHECK(on.contains("command inertia: M + diag(0.000, 0.000, 0.000, 0.000, 0.500, 0.500, 0.500) kg m^2"));
+        CHECK(on.contains("integral action k_i,eta 25, K_i 36, K_i,beta 36, clamped at 1.0, 1.0, 3.0"));
+        const Csv log = readCsv(logPath("coulomb_on"));
+        // The integral terms are logged and bounded by their clamps
+        double maxIXi = 0.0, maxIBeta = 0.0, maxIEta = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            maxIEta = std::max(maxIEta, std::abs(log.at(k, "int_eta")));
+            maxIXi = std::max(maxIXi, log.at(k, "int_xi"));
+            maxIBeta = std::max(maxIBeta, std::abs(log.at(k, "int_beta")));
+        }
+        CAPTURE(maxIEta, maxIXi, maxIBeta);
+        CHECK(maxIEta <= loops.gains.integralMaxEta + 1e-9);
+        CHECK(maxIXi <= std::sqrt(5.0) * loops.gains.integralMaxXi + 1e-9);
+        CHECK(maxIBeta <= loops.gains.integralMaxBeta + 1e-9);
+        CHECK(maxIEta > 1e-4);  // the integrals work (the plant's friction leaves something to integrate)
+        const Cruise d = cruiseOf(log);
+        CAPTURE(d.etaDot, d.maxXi, d.maxBeta);
+        CHECK(d.etaDot > 0.95 * nuD);  // 99 %
+        CHECK(d.etaDot < 1.05 * nuD);
+        CHECK(d.maxXi < 5e-3);         // 2e-3 (pass criterion 2e-2)
+        CHECK(d.maxBeta < 1e-2);       // 6e-3 (3e-2)
+        for (int i = 0; i < 7; ++i)    // every joint moves along the lift
+            CHECK(d.meanAbsDq[i] > 0.01);
+        // tau_f in the log: within Fc + Fv |v|, reaching Fc on every joint, and smooth (the commanded torque rate
+        // stays far below the 600 N m/s margin)
+        Vec7 maxTauF = Vec7::Zero();
+        double maxRate = 0.0;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            const Vec7 tauF = log.vec(k, "tauF");
+            CHECK((tauF.cwiseAbs().array() <= tauFBound(loops).array() + 1e-9).all());
+            maxTauF = maxTauF.cwiseMax(tauF.cwiseAbs());
+            if (k > 0)
+                maxRate = std::max(maxRate, (log.vec(k, "tau") - log.vec(k - 1, "tau")).cwiseAbs().maxCoeff() / 1e-3);
+        }
+        CAPTURE(maxTauF.transpose(), maxRate);
+        CHECK((maxTauF.array() > 0.9 * fc.array()).all());
+        CHECK(maxRate < 60.0);  // 23 N m/s on the hardware lift (3 on the paper's); the robot's noise gives 100 to 170
+        // The prediction carries the same feedforward
+        const Csv pred = readCsv(fs::path(logPath("coulomb_on").string() + ".preflight.csv"));
+        REQUIRE(pred.rows.size() > 30000);
+        double predMax = 0.0;
+        for (std::size_t k = 0; k < pred.rows.size(); ++k)
+            predMax = std::max(predMax, pred.vec(k, "tauF").cwiseAbs().maxCoeff());
+        CHECK(predMax >= fc.maxCoeff() - 1e-6);
+        CHECK(predMax <= tauFBound(loops).maxCoeff());
+    }
+}
+
+TEST_CASE("robot_driver_mock: joint identification on the simulated robot recovers its friction and inertia",
+          SLOW_IN_DEBUG)
+{
+    // The plant: Coulomb friction and rotor inertia the model does not have; the identification of joints 2 and 6
+    // must find the breakaway at the Coulomb level, the kinetic friction, and the inertia as the mock's M plus the
+    // rotor (the mock's torque sensor reads the command plus G, so the sensor-side inertia is the same)
+    const Vec7 fc = (Vec7() << 0.8, 1.2, 0.7, 0.6, 0.7, 0.4, 0.6).finished();
+    const Vec7 rotor = (Vec7() << 0, 0, 0, 0, 0.3, 0.3, 0.3).finished();
+    const std::string env = coulombEnv(fc) + " FRANKA_MOCK_ROTOR=" + csv7(rotor);
+    for (int joint : {2, 6}) {
+        CAPTURE(joint);
+        const std::string name = "identify_" + std::to_string(joint);
+        const Run r = run("0.0.0.0 identify --yes --joint=" + std::to_string(joint) + " " + logArg(name), env);
+        INFO(r.out);
+        REQUIRE(r.code == 0);
+        CHECK(r.contains("callback allocations: 0"));
+        CHECK_FALSE(r.contains("SAFETY STOP"));
+        CHECK_FALSE(r.contains("not found"));
+        const Csv log = readCsv(logPath(name));
+        REQUIRE(log.rows.size() > 5000);
+        // From the log: the fit the driver printed, recomputed here
+        std::vector<IdentifyLogRow> rows;
+        for (std::size_t k = 0; k < log.rows.size(); ++k) {
+            IdentifyLogRow row;
+            row.t = log.at(k, "t");
+            row.phase = static_cast<int>(log.at(k, "phase"));
+            row.joint = static_cast<int>(log.at(k, "joint"));
+            row.direction = static_cast<int>(log.at(k, "dir"));
+            row.pulse = static_cast<int>(log.at(k, "pulse"));
+            row.pulseTorque = log.at(k, "pulse_tau");
+            row.tau = log.vec(k, "tau");
+            row.q = log.vec(k, "q");
+            row.dq = log.vec(k, "dq");
+            row.tauJ = log.vec(k, "tauJ");
+            row.G = log.vec(k, "G");
+            rows.push_back(row);
+        }
+        const std::vector<JointIdentificationResult> fit = fitIdentification(rows, IdentifySettings());
+        const JointIdentificationResult& x = fit[static_cast<std::size_t>(joint - 1)];
+        // The mock's M at the rest posture (its model's mass matrix) plus the rotor
+        const double mModel = franka::mock::ToyArm(1.0).mass(PandaArm::restPosture(), franka::mock::frankaHand())(joint - 1, joint - 1);
+        for (int d = 0; d < 2; ++d) {
+            CAPTURE(d, x.breakawayCmd[d], x.kineticFriction[d], x.inertiaCmd[d], mModel + rotor[joint - 1]);
+            REQUIRE(x.found[d]);
+            CHECK_THAT(x.breakawayCmd[d], Catch::Matchers::WithinAbs(fc[joint - 1], 0.08));
+            CHECK(x.breakawayRaw[d] >= x.breakawayCmd[d]);
+            REQUIRE(x.inertiaFound[d]);
+            CHECK_THAT(x.kineticFriction[d], Catch::Matchers::WithinAbs(fc[joint - 1], 0.1));
+            CHECK_THAT(x.inertiaCmd[d], Catch::Matchers::WithinRel(mModel + rotor[joint - 1], 0.2));
+        }
+        // Every joint ends where it started, within the travel of the pulses, at rest
+        const std::size_t last = log.rows.size() - 1;
+        CHECK(testing::maxDiff(log.vec(last, "q"), log.vec(0, "q")) < 0.5);
+        CHECK(log.vec(last, "dq").norm() < 0.02);
+    }
+    // Refusals: a joint index out of range, a log that exists, a dry run moves nothing
+    CHECK(run("0.0.0.0 identify --yes --joint=8").code == 1);
+    CHECK(run("0.0.0.0 identify --yes --joint=0").code == 1);
+    CHECK(run("0.0.0.0 identify --yes --joint=x").code == 1);
+    const Run dry = run("0.0.0.0 identify --yes --dry-run --joint=3 " + logArg("identify_dry"));
+    CHECK(dry.code == 0);
+    CHECK(dry.contains("Dry run: no motion."));
+    CHECK_FALSE(fs::exists(logPath("identify_dry")));
+}
+
 TEST_CASE("robot_driver_mock: late periods (lost packets): the run keeps time and its margins", SLOW_IN_DEBUG)
 {
     // Every 50th period lasts 3 ms (the robot keeps the last command; the next callback gets a 3 ms period)
@@ -472,8 +741,9 @@ TEST_CASE("robot_driver_mock: the driver refuses to move: kinematics, robot mode
     }
     SECTION("the approach ends off the start (exit 7): no torque control")
     {
-        // 0.02 rad on every joint (the joint check), and 3e-3 rad (inside the joint tolerance; xi and beta are off)
-        for (const char* e : {"0.02", "0.003"}) {
+        // 0.02 rad on every joint (the joint check), and 6e-3 rad (inside the joint tolerance; xi and beta are off
+        // the 4e-3 start tolerance)
+        for (const char* e : {"0.02", "0.006"}) {
             CAPTURE(e);
             const Run r = run("0.0.0.0 self-motion --yes " + logArg("off"), std::string("FRANKA_MOCK_APPROACH_ERROR=") + e);
             INFO(r.out);

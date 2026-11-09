@@ -114,9 +114,17 @@ namespace franka {
 
                         for (int sub = 0; sub < 2; ++sub) {  // semi-implicit Euler, 0.5 ms
                             const double h = 0.5 * dt;
-                            const mock::Vec7 rhs = motor + ext - config_.friction * dq_
+                            const mock::Vec7 rhs = motor + ext - config_.friction.cwiseProduct(dq_)
                                                    - plant.coriolis(q_, dq_, plantLoad_) - plant.gravity(q_, plantLoad_, g);
-                            const mock::Vec7 ddq = plant.mass(q_, plantLoad_).ldlt().solve(rhs);
+                            // Coulomb friction -Fc sign(qd) (FRANKA_MOCK_COULOMB), regularized to -Fc qd / max(|qd|,
+                            // vEps) and taken implicitly in qd, since its slope at rest, Fc / vEps, is stiff:
+                            // (M + h D) ddq = rhs - D qd with D = Fc / max(|qd|, vEps). A joint under a net torque
+                            // below Fc stays put (it creeps at most vEps; the Panda's joints held 0.3 to 1.1 N m
+                            // on 2026-10-19), one above it moves against Fc. Zero Fc: the plain plant.
+                            const mock::Vec7 D = config_.coulomb.cwiseQuotient(dq_.cwiseAbs().cwiseMax(kCoulombVelocity));
+                            mock::Mat7 Mh = plant.mass(q_, plantLoad_);
+                            Mh.diagonal() += config_.rotor + h * D;  // rotor inertia the model does not have
+                            const mock::Vec7 ddq = Mh.ldlt().solve(rhs - D.cwiseProduct(dq_));
                             dq_ += h * ddq;
                             q_ += h * dq_;
                         }
@@ -278,6 +286,8 @@ namespace franka {
             ServerVersion serverVersion() const noexcept { return 5; }  // the robot server version of libfranka 0.9.x
 
         private:
+            static constexpr double kCoulombVelocity = 1e-4;  // rad/s: the regularization of sign(qd), plant only
+
             static std::array<double, 7> tau0() { return {}; }
 
             static const char* modeString(RobotMode m)

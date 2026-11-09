@@ -28,19 +28,63 @@ namespace se3pf {
         }
     }  // namespace
 
+    namespace {
+        std::unique_ptr<const Path> makePath(PathKind kind, const Matrix3d& R0, const Metric& W)
+        {
+            switch (kind) {
+                case PathKind::Coning:
+                    return std::make_unique<ConingCircle>(R0, PandaExample::center(), PandaExample::radius,
+                                                          PandaExample::cone, W);
+                case PathKind::Orbit:
+                    return std::make_unique<SampledPath>(inspectionOrbit(R0, InspectionOrbit()), W);
+                case PathKind::DomeEight:
+                    return std::make_unique<SampledPath>(domeFigureEight(R0, DomeFigureEight()), W);
+                case PathKind::Rail:
+                    return std::make_unique<SampledPath>(straightRail(R0, StraightRail()), W);
+            }
+            throw std::invalid_argument("PandaExample: unknown path");
+        }
+    }  // namespace
+
+    const char* toString(PathKind kind)
+    {
+        switch (kind) {
+            case PathKind::Coning: return "coning circle";
+            case PathKind::Orbit: return "inspection orbit";
+            case PathKind::DomeEight: return "dome figure-eight";
+            case PathKind::Rail: return "straight rail";
+        }
+        return "?";
+    }
+
+    PandaExample::PandaExample(double l, const Vec7& liftWeights) : PandaExample(PathKind::Coning, l, liftWeights)
+    {
+    }
+
     // Members are initialized in the order of their declaration, which is the order of the list below.
-    PandaExample::PandaExample(double l)
-        : metric_(exampleMetric(l)),
+    PandaExample::PandaExample(PathKind kind, double l, const Vec7& liftWeights)
+        : kind_(kind),
+          metric_(exampleMetric(l)),
           R0_(restAttitude()),
-          path_(R0_, center(), radius, cone, metric_),
-          tube_(path_, metric_),
-          lift_(path_, PandaArm::restPosture()),
+          path_(makePath(kind, R0_, metric_)),
+          tube_(*path_, metric_),
+          lift_(*path_, PandaArm::restPosture(), 2000, liftWeights),
           kernel_(lift_),
           beta_(lift_, kernel_),
           coupling_(),
           paperStart_(start(beta_, xi0(), 0.0)),
           selfMotionStart_(start(beta_, Vec5::Zero(), selfMotionBeta0))
     {
+    }
+
+    Vec7 PandaExample::hardwareLiftWeights()
+    {
+        // Weight 10 on joint 7 (CTRL-1, 2026-10-19): per loop at nu_d = 0.05 joint 1 then travels 1.26 rad at up to
+        // 0.22 rad/s and is below 10 mrad/s for 2 % of the loop (the paper's lift: 0.28 rad, 0.047 rad/s, 42 %),
+        // joint 7 still moves 0.90 rad; the joint margin stays 0.358 rad, sigma_min(J_b) 0.18 (0.21), the lift is a
+        // minimum (check 4.1e-3), peak joint speeds 13 % of their limits (joint 3). 20 would put joint 1 at 15 %
+        // and |q*'| at 10.7 for little more gain.
+        return (Vec7() << 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0).finished();
     }
 
     Vec7 PandaExample::start(const RedundancyOutput& beta, const Vec5& xi, double beta0) const

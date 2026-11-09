@@ -58,7 +58,7 @@ namespace se3pf {
         static constexpr double tauRateFrac = 0.6;   // commanded |d(tau_i - G_i)/dt| <= 60 % of tauRateMax
         static constexpr double flangeSpeed = 0.5;   // m/s, translational
         static constexpr double xi = 0.04;           // |xi|, in the units of the metric (Panda: m, 1 rad = 0.1 m)
-        static constexpr double beta = 0.05;         // |beta|, rad
+        static constexpr double beta = 0.1;         // |beta|, rad
         static constexpr double sigmaMin = 1e-3;     // sigma_min(A) at least
     };
 
